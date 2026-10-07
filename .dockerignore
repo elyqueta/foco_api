@@ -2,6 +2,7 @@ vendor
 node_modules
 public/hot
 public/storage
+public/docs
 storage/*.key
 .git
 .gitignore
@@ -9,6 +10,7 @@ README.md
 docker-compose.yml
 .dockerignore
 .env
+.env.example
 .idea
 .vscode
 *.swp
@@ -20,3 +22,7 @@ phpunit.xml
 .kilo
 .kilocode
 .boosts
+database/*.sqlite
+storage/logs/*
+docs
+.github

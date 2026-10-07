@@ -4,20 +4,34 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "8000:8080"
+    env_file: .env
     environment:
-      - APP_ENV=local
-      - APP_DEBUG=true
-      - APP_KEY=base64:enxs9MMLkPu63fyw4Fof4X83/Cnu+hVmiLl8GR2Ctl8=
-      - APP_URL=http://localhost:8080
-      - DB_CONNECTION=sqlite
-      - DB_DATABASE=/var/www/html/database/database.sqlite
-      - SESSION_DRIVER=file
-      - CACHE_STORE=file
-      - QUEUE_CONNECTION=sync
-      - LOG_CHANNEL=stack
-      - LOG_STACK=single
-      - LOG_LEVEL=debug
-    volumes:
-      - ./database:/var/www/html/database
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: foco
+      DB_USERNAME: foco
+      DB_PASSWORD: foco
+      DB_URL: ""
+      DB_DIRECT_URL: ""
+      DB_SSLMODE: prefer
+      RUN_MIGRATIONS: "false"
     restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_DB: foco
+      POSTGRES_USER: foco
+      POSTGRES_PASSWORD: foco
+    ports: ["127.0.0.1:5437:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foco -d foco"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
