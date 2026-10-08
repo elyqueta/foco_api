@@ -10,7 +10,7 @@
     <div id="scalar"></div>
     <script>
         window.scalar = new Scalar({
-            url: "/api/docs",
+            url: "/api/v1/docs.json",
             mountEl: document.getElementById("scalar"),
             layout: "classic",
             darkMode: "no-preference",
