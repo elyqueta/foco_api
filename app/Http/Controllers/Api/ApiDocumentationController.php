@@ -24,7 +24,7 @@ class ApiDocumentationController
                 'description' => 'Endpoints actualmente disponíveis na API Foco.',
             ],
             'servers' => [
-                ['url' => '/api'],
+                ['url' => '/api/v1'],
             ],
             'paths' => [
                 '/health' => [
@@ -96,6 +96,48 @@ class ApiDocumentationController
                             ],
                             '401' => [
                                 'description' => 'Token ausente ou inválido.',
+                            ],
+                        ],
+                    ],
+                ],
+                '/login' => [
+                    'post' => [
+                        'summary' => 'Login',
+                        'description' => 'Autentica e retorna token Sanctum.',
+                        'operationId' => 'login',
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['email', 'password'],
+                                        'properties' => [
+                                            'email' => ['type' => 'string', 'format' => 'email'],
+                                            'password' => ['type' => 'string', 'format' => 'password'],
+                                            'device_name' => ['type' => 'string'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Login realizado com sucesso.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'token' => ['type' => 'string'],
+                                                'user' => ['type' => 'object'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '422' => [
+                                'description' => 'Dados de entrada inválidos.',
                             ],
                         ],
                     ],
