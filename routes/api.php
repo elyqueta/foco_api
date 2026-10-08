@@ -44,6 +44,10 @@ Route::get('/', function () {
 Route::get('/docs', [ApiDocumentationController::class, 'openApi']);
 Route::get('/docs.json', [ApiDocumentationController::class, 'openApi']);
 
+Route::get('/login', function () {
+    abort(401, 'Unauthenticated');
+})->name('login');
+
 Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
