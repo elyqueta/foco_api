@@ -15,7 +15,7 @@ class ApiDocumentationController
             'info' => [
                 'title' => config('app.name', 'Foco API').' — v1',
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
             ],
             'servers' => [
                 ['url' => '/api', 'description' => 'Base da API: rotas de domínio em /api/v1/*, sistema em /api/*'],
@@ -246,7 +246,20 @@ class ApiDocumentationController
                                     ],
                                 ],
                             ],
-                            '422' => ['description' => 'Dados inválidos ou palavra-passe actual incorreta.'],
+                            '422' => [
+                                'description' => 'Palavra-passe atual incorreta ou nenhuma alteração detetada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                         ],
                     ],
                 ],
@@ -288,7 +301,18 @@ class ApiDocumentationController
                             ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
                             '422' => [
-                                'description' => 'Dados inválidos, email já registado ou palavra-passe atual incorreta.',
+                                'description' => 'Dados inválidos, email já registado, palavra-passe atual incorreta ou nenhuma alteração detetada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
                             ],
                         ],
                     ],
@@ -329,7 +353,20 @@ class ApiDocumentationController
                         ],
                         'responses' => [
                             '200' => ['description' => 'Definições actualizadas.'],
-                            '422' => ['description' => 'Dados inválidos.'],
+                            '422' => [
+                                'description' => 'Dados inválidos ou nenhuma alteração detetada (code NO_CHANGES).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                         ],
                     ],
                 ],

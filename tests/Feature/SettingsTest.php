@@ -194,14 +194,49 @@ class SettingsTest extends TestCase
 
         $this->patchJson('/api/v1/settings', [
             'notifications' => [
-                'types' => ['task_completed' => ['email' => true]],
+                'types' => ['task_completed' => ['email' => false]],
             ],
         ])->assertOk();
 
         $preference = $user->fresh()->notificationPreference;
 
-        $this->assertSame(['email' => true], $preference->types['task_completed']);
-        $this->assertSame(['email' => true, 'inApp' => true], $preference->typesWithDefaults()['task_completed']);
+        $this->assertSame(['email' => false], $preference->types['task_completed']);
+        $this->assertSame(['email' => false, 'inApp' => true], $preference->typesWithDefaults()['task_completed']);
+    }
+
+    #[Test]
+    public function settings_update_rejects_when_nothing_changes(): void
+    {
+        $user = $this->actingAsUser([
+            'name' => 'Zua',
+            'theme' => 'dark',
+            'timezone' => 'Africa/Luanda',
+        ]);
+
+        // Valores idênticos aos actuais: nenhuma alteração.
+        $this->patchJson('/api/v1/settings', [
+            'userName' => 'Zua',
+            'theme' => 'dark',
+            'timezone' => 'Africa/Luanda',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'NO_CHANGES')
+            ->assertJsonPath('message', 'Nenhuma alteração detetada.');
+
+        // Corpo vazio também não atualiza.
+        $this->patchJson('/api/v1/settings', [])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'NO_CHANGES');
+
+        $user->refresh();
+
+        $this->assertSame('dark', $user->theme);
+        $this->assertSame('Zua', $user->name);
+
+        // Uma mudança real continua a funcionar.
+        $this->patchJson('/api/v1/settings', ['theme' => 'light'])
+            ->assertOk()
+            ->assertJsonPath('theme', 'light');
     }
 
     #[Test]

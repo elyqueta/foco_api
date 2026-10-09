@@ -20,4 +20,13 @@ class DomainRuleException extends Exception
     ) {
         parent::__construct($message, 0, $previous);
     }
+
+    /**
+     * Padrão da API para atualizações: se o pedido não muda nenhum valor,
+     * não atualiza nem responde com sucesso — devolve 422 NO_CHANGES.
+     */
+    public static function noChanges(): self
+    {
+        return new self('NO_CHANGES', 'Nenhuma alteração detetada.', 422);
+    }
 }

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\DomainRuleException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Settings\UpdateSettingsRequest;
 use App\Http\Resources\V1\SettingsResource;
 use App\Models\NotificationPreference;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -29,11 +31,31 @@ class SettingsController extends Controller
         $user = $request->user();
         $data = $request->validated();
 
-        DB::transaction(function () use ($user, $data): void {
-            $this->updateUserFields($user, $data);
+        $userFields = $this->userFields($user, $data);
 
-            if (array_key_exists('notifications', $data)) {
-                $this->updateNotifications($user, $data['notifications']);
+        $notificationFields = array_key_exists('notifications', $data)
+            ? $this->notificationFields($user, $data['notifications'])
+            : [];
+
+        // Padrão da API: se nada muda, não atualiza nem responde com sucesso.
+        if ($userFields === [] && $notificationFields === []) {
+            throw DomainRuleException::noChanges();
+        }
+
+        DB::transaction(function () use ($user, $userFields, $notificationFields): void {
+            if ($userFields !== []) {
+                $user->update($userFields);
+            }
+
+            if ($notificationFields !== []) {
+                $preference = $user->notificationPreference()->firstOrCreate(
+                    ['user_id' => $user->id],
+                    NotificationPreference::defaultAttributes(),
+                );
+
+                $preference->update($notificationFields);
+
+                $user->setRelation('notificationPreference', $preference);
             }
         });
 
@@ -41,9 +63,12 @@ class SettingsController extends Controller
     }
 
     /**
+     * Campos do utilizador que realmente mudam (diff contra o valor atual).
+     *
      * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
      */
-    private function updateUserFields(User $user, array $data): void
+    private function userFields(User $user, array $data): array
     {
         $fields = [];
 
@@ -53,15 +78,16 @@ class SettingsController extends Controller
             }
         }
 
-        if ($fields !== []) {
-            $user->update($fields);
-        }
+        return $this->onlyChanged($user, $fields);
     }
 
     /**
+     * Campos das preferências de notificação que realmente mudam.
+     *
      * @param  array<string, mixed>  $notifications
+     * @return array<string, mixed>
      */
-    private function updateNotifications(User $user, array $notifications): void
+    private function notificationFields(User $user, array $notifications): array
     {
         $preference = $user->notificationPreference()->firstOrCreate(
             ['user_id' => $user->id],
@@ -92,10 +118,22 @@ class SettingsController extends Controller
             );
         }
 
-        if ($fields !== []) {
-            $preference->update($fields);
-        }
+        return $this->onlyChanged($preference, $fields);
+    }
 
-        $user->setRelation('notificationPreference', $preference);
+    /**
+     * Filtra apenas os atributos cujo valor difere do actual (comparação
+     * flexível para ignorar ruído de tipo, ex. 8 vs "8").
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function onlyChanged(Model $model, array $fields): array
+    {
+        return array_filter(
+            $fields,
+            fn (mixed $value, string $column): bool => $model->getAttribute($column) != $value,
+            ARRAY_FILTER_USE_BOTH,
+        );
     }
 }

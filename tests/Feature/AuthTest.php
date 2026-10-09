@@ -188,6 +188,23 @@ class AuthTest extends TestCase
     }
 
     #[Test]
+    public function password_update_rejects_same_password(): void
+    {
+        $user = User::factory()->create(['password' => '12345678']);
+
+        $this->authenticateAs($user);
+
+        $this->patchJson('/api/v1/auth/password', [
+            'currentPassword' => '12345678',
+            'password' => '12345678',
+            'passwordConfirmation' => '12345678',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'NO_CHANGES')
+            ->assertJsonPath('message', 'Nenhuma alteração detetada.');
+    }
+
+    #[Test]
     public function logout_revokes_current_token(): void
     {
         $user = $this->actingAsUser();

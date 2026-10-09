@@ -151,16 +151,32 @@ class ProfileTest extends TestCase
     }
 
     #[Test]
-    public function email_change_to_same_email_writes_no_history(): void
+    public function email_change_to_same_email_is_rejected_as_no_change(): void
     {
         $user = $this->actingAsUser(['email' => 'igual@todo.ao']);
 
         $this->patchJson('/api/v1/auth/profile', [
             'email' => 'igual@todo.ao',
             'currentPassword' => 'password',
-        ])->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'NO_CHANGES')
+            ->assertJsonPath('message', 'Nenhuma alteração detetada.');
 
+        $this->assertSame('igual@todo.ao', $user->fresh()->email);
         $this->assertSame(0, EmailChangeLog::where('user_id', $user->id)->count());
+    }
+
+    #[Test]
+    public function update_with_identical_name_is_rejected_as_no_change(): void
+    {
+        $user = $this->actingAsUser(['name' => 'Zua']);
+
+        $this->patchJson('/api/v1/auth/profile', ['name' => 'Zua'])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'NO_CHANGES');
+
+        $this->assertSame('Zua', $user->fresh()->name);
     }
 
     #[Test]

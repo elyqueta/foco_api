@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Actions\Users\ProvisionUserDefaults;
+use App\Exceptions\DomainRuleException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Auth\LoginRequest;
 use App\Http\Requests\V1\Auth\RegisterRequest;
@@ -122,8 +123,14 @@ class AuthController extends Controller
 
     public function updatePassword(UpdatePasswordRequest $request): JsonResponse
     {
+        /** @var User $user */
         $user = $request->user();
         $data = $request->validated();
+
+        // Padrão da API: mesma palavra-passe = nenhuma alteração.
+        if (Hash::check((string) $data['password'], (string) $user->password)) {
+            throw DomainRuleException::noChanges();
+        }
 
         if ($user instanceof User) {
             DB::transaction(function () use ($user, $data): void {
@@ -155,7 +162,13 @@ class AuthController extends Controller
 
         $name = array_key_exists('name', $data) ? (string) $data['name'] : null;
         $email = array_key_exists('email', $data) ? (string) $data['email'] : null;
+        $nameChanged = $name !== null && $name !== $user->name;
         $emailChanged = $email !== null && $email !== $user->email;
+
+        // Padrão da API: atualização sem nenhum valor novo não atualiza.
+        if (! $nameChanged && ! $emailChanged) {
+            throw DomainRuleException::noChanges();
+        }
 
         DB::transaction(function () use ($user, $name, $email, $emailChanged, $request): void {
             if ($emailChanged) {
