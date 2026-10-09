@@ -23,14 +23,19 @@ class ProvisionUserDefaults
     /**
      * Provision default categories and notification preferences for a user.
      * Idempotent: safe to call multiple times.
+     *
+     * `$protected = false` cria as categorias padrão elimináveis — usado no
+     * auto-registo de utilizadores comuns. O `UserObserver` cria primeiro as
+     * protegidas, por isso o registo reconcilia a flag com `updateOrCreate`
+     * (o utilizador novo ainda não tem dados, a mudança é segura).
      */
-    public function handle(User $user): void
+    public function handle(User $user, bool $protected = true): void
     {
-        DB::transaction(function () use ($user): void {
+        DB::transaction(function () use ($user, $protected): void {
             foreach (self::DEFAULT_CATEGORIES as $category) {
-                $user->categories()->firstOrCreate(
+                $user->categories()->updateOrCreate(
                     ['name_key' => $category['name_key']],
-                    $category,
+                    ['name' => $category['name'], 'is_default' => $protected],
                 );
             }
 

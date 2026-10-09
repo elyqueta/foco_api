@@ -18,7 +18,7 @@ class RemoveCategory
      * Remove uma categoria personalizada do utilizador: numa transação,
      * todas as tarefas e projetos com essa categoria passam a `professional`
      * (com atividade `edited` em cada um) e só depois a categoria é apagada.
-     * Categorias padrão são protegidas (CATEGORY_PROTECTED).
+     * Categorias padrão protegidas (`is_default`) não são removidas.
      *
      * A reatribuição é feita em conjunto (UPDATE + INSERT multi-row) para
      * não prender locks em transações longas com muitos itens.
@@ -34,45 +34,36 @@ class RemoveCategory
         }
 
         DB::transaction(function () use ($user, $category): void {
-            $fallback = app(ResolveCategory::class)->fallback($user);
+            $taskIds = $user->tasks()->where('category', $category->name)->pluck('id');
+            $projectIds = $user->projects()->where('category', $category->name)->pluck('id');
 
-            $this->reassignTasks($user, $category, $fallback);
-            $this->reassignProjects($user, $category, $fallback);
-
+            // Apagar primeiro: `tasks/projects.category` é uma string simples
+            // (sem foreign key) e o fallback pode precisar de recriar a
+            // categoria padrão — que colidiria com a linha ainda existente.
             $category->delete();
+
+            if ($taskIds->isNotEmpty() || $projectIds->isNotEmpty()) {
+                $fallback = app(ResolveCategory::class)->fallback($user, $category);
+
+                if ($taskIds->isNotEmpty()) {
+                    $user->tasks()->whereKey($taskIds)->update([
+                        'category' => $fallback->name,
+                        'updated_at' => now(),
+                    ]);
+
+                    $this->logReassignment($user, 'task', $taskIds->all(), $fallback);
+                }
+
+                if ($projectIds->isNotEmpty()) {
+                    $user->projects()->whereKey($projectIds)->update([
+                        'category' => $fallback->name,
+                        'updated_at' => now(),
+                    ]);
+
+                    $this->logReassignment($user, 'project', $projectIds->all(), $fallback);
+                }
+            }
         });
-    }
-
-    private function reassignTasks(User $user, Category $category, Category $fallback): void
-    {
-        $ids = $user->tasks()->where('category', $category->name)->pluck('id');
-
-        if ($ids->isEmpty()) {
-            return;
-        }
-
-        $user->tasks()->whereKey($ids)->update([
-            'category' => $fallback->name,
-            'updated_at' => now(),
-        ]);
-
-        $this->logReassignment($user, 'task', $ids->all(), $fallback);
-    }
-
-    private function reassignProjects(User $user, Category $category, Category $fallback): void
-    {
-        $ids = $user->projects()->where('category', $category->name)->pluck('id');
-
-        if ($ids->isEmpty()) {
-            return;
-        }
-
-        $user->projects()->whereKey($ids)->update([
-            'category' => $fallback->name,
-            'updated_at' => now(),
-        ]);
-
-        $this->logReassignment($user, 'project', $ids->all(), $fallback);
     }
 
     /**

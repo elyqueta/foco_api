@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
+use App\Actions\Users\ProvisionUserDefaults;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Auth\LoginRequest;
+use App\Http\Requests\V1\Auth\RegisterRequest;
 use App\Http\Requests\V1\Auth\UpdatePasswordRequest;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -39,6 +41,15 @@ class AuthController extends Controller
             ], 401);
         }
 
+        return $this->issueToken($request, $user);
+    }
+
+    /**
+     * Cria o token Sanctum (nome por dispositivo + expiração da config) e
+     * devolve o payload de autenticação do contrato.
+     */
+    private function issueToken(Request $request, User $user, int $status = 200): JsonResponse
+    {
         $tokenName = 'foco-web';
         $userAgent = $request->userAgent();
 
@@ -55,7 +66,32 @@ class AuthController extends Controller
             'token' => $token->plainTextToken,
             'user' => $this->userPayload($user),
             'expires_at' => $expiresAt?->utc()->format('Y-m-d\TH:i:s\Z'),
-        ]);
+        ], $status);
+    }
+
+    /**
+     * Auto-registo de utilizador comum. Cria a conta, provisiona as 3
+     * categorias padrão elimináveis (sem projetos nem tarefas) e devolve o
+     * mesmo payload do login (token + user + expires_at), ou seja, o
+     * utilizador fica autenticado a seguir ao registo.
+     */
+    public function register(RegisterRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $user = DB::transaction(function () use ($data): User {
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $data['password'],
+            ]);
+
+            app(ProvisionUserDefaults::class)->handle($user, protected: false);
+
+            return $user;
+        });
+
+        return $this->issueToken($request, $user, 201);
     }
 
     public function logout(Request $request): JsonResponse

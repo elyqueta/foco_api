@@ -53,23 +53,29 @@ class ResolveCategory
     }
 
     /**
-     * Categoria padrão que recebe reatribuições e serve de default.
+     * Categoria que recebe reatribuições e serve de default. Como os
+     * utilizadores auto-registados têm as categorias padrão elimináveis,
+     * o fallback nunca pode falhar: tenta a padrão, depois a mais antiga
+     * restante e, em último caso, (re)cria a padrão sem protecção.
+     *
+     * @param  Category|null  $exclude  categoria a remover (nunca é fallback)
      */
-    public function fallback(User $user): Category
+    public function fallback(User $user, ?Category $exclude = null): Category
     {
-        $fallback = $user->categories()
-            ->where('name_key', Category::DEFAULT_KEY)
-            ->where('is_default', true)
-            ->first();
+        $remaining = fn () => $user->categories()
+            ->when($exclude instanceof Category, fn ($query) => $query->whereKeyNot($exclude->getKey()));
 
-        if (! $fallback instanceof Category) {
-            throw new DomainRuleException(
-                'CATEGORY_FALLBACK_MISSING',
-                'A categoria professional padrão não existe.',
-                500,
-            );
+        $fallback = $remaining()->where('name_key', Category::DEFAULT_KEY)->first()
+            ?? $remaining()->orderBy('id')->first();
+
+        if ($fallback instanceof Category) {
+            return $fallback;
         }
 
-        return $fallback;
+        return $user->categories()->create([
+            'name' => Category::DEFAULT_KEY,
+            'name_key' => Category::DEFAULT_KEY,
+            'is_default' => false,
+        ]);
     }
 }

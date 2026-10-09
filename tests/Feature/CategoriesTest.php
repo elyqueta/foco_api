@@ -24,7 +24,7 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->getJson('/api/categories')
+        $this->getJson('/api/v1/categories')
             ->assertOk()
             ->assertJsonCount(3)
             ->assertJson([
@@ -33,7 +33,7 @@ class CategoriesTest extends TestCase
                 ['name' => 'professional', 'isDefault' => true, 'tasksCount' => 0, 'projectsCount' => 0],
             ]);
 
-        $names = array_column($this->getJson('/api/categories')->assertOk()->json(), 'name');
+        $names = array_column($this->getJson('/api/v1/categories')->assertOk()->json(), 'name');
 
         $this->assertSame(['household', 'personal', 'professional'], $names);
     }
@@ -46,7 +46,7 @@ class CategoriesTest extends TestCase
         $user->categories()->create(['name' => 'Estudos', 'name_key' => 'estudos', 'is_default' => false]);
         $user->categories()->create(['name' => 'Aulas', 'name_key' => 'aulas', 'is_default' => false]);
 
-        $names = array_column($this->getJson('/api/categories')->assertOk()->json(), 'name');
+        $names = array_column($this->getJson('/api/v1/categories')->assertOk()->json(), 'name');
 
         $this->assertSame(['household', 'personal', 'professional', 'Aulas', 'Estudos'], $names);
     }
@@ -56,7 +56,7 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->postJson('/api/categories', ['name' => 'Estudos'])
+        $this->postJson('/api/v1/categories', ['name' => 'Estudos'])
             ->assertStatus(201)
             ->assertJson([
                 'name' => 'Estudos',
@@ -79,7 +79,7 @@ class CategoriesTest extends TestCase
 
         // O nome guardado é o texto com espaços nas pontas removidos; a
         // comparação (name_key) colapsa espaços internos e minúsculas.
-        $this->postJson('/api/categories', ['name' => '  Estudos   Avançados  '])
+        $this->postJson('/api/v1/categories', ['name' => '  Estudos   Avançados  '])
             ->assertStatus(201)
             ->assertJson([
                 'name' => 'Estudos   Avançados',
@@ -99,12 +99,12 @@ class CategoriesTest extends TestCase
 
         $user->categories()->create(['name' => 'Estudos', 'name_key' => 'estudos', 'is_default' => false]);
 
-        $this->postJson('/api/categories', ['name' => 'estudos'])
+        $this->postJson('/api/v1/categories', ['name' => 'estudos'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['name'])
             ->assertJsonPath('errors.name.0', 'Esta categoria já existe.');
 
-        $this->postJson('/api/categories', ['name' => 'ESTUDOS'])
+        $this->postJson('/api/v1/categories', ['name' => 'ESTUDOS'])
             ->assertStatus(422)
             ->assertJsonPath('errors.name.0', 'Esta categoria já existe.');
     }
@@ -114,7 +114,7 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->postJson('/api/categories', ['name' => 'professional'])
+        $this->postJson('/api/v1/categories', ['name' => 'professional'])
             ->assertStatus(422)
             ->assertJsonPath('errors.name.0', 'Esta categoria já existe.');
     }
@@ -124,12 +124,12 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->postJson('/api/categories', ['name' => 'a'])
+        $this->postJson('/api/v1/categories', ['name' => 'a'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['name'])
             ->assertJsonPath('errors.name.0', 'Mínimo de 2 caracteres.');
 
-        $this->postJson('/api/categories', ['name' => str_repeat('a', 61)])
+        $this->postJson('/api/v1/categories', ['name' => str_repeat('a', 61)])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['name'])
             ->assertJsonPath('errors.name.0', 'Máximo de 60 caracteres.');
@@ -140,7 +140,7 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->postJson('/api/categories', [])
+        $this->postJson('/api/v1/categories', [])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['name']);
     }
@@ -158,7 +158,7 @@ class CategoriesTest extends TestCase
 
         $this->switchTo(User::factory()->create());
 
-        $categories = collect($this->getJson('/api/categories')->assertOk()->json());
+        $categories = collect($this->getJson('/api/v1/categories')->assertOk()->json());
 
         $estudos = $categories->firstWhere('name', 'Estudos');
         $professional = $categories->firstWhere('name', 'professional');
@@ -169,7 +169,7 @@ class CategoriesTest extends TestCase
 
         $this->switchTo($userA);
 
-        $categories = collect($this->getJson('/api/categories')->assertOk()->json());
+        $categories = collect($this->getJson('/api/v1/categories')->assertOk()->json());
 
         $this->assertSame(2, $categories->firstWhere('name', 'Estudos')['tasksCount']);
         $this->assertSame(1, $categories->firstWhere('name', 'Estudos')['projectsCount']);
@@ -182,7 +182,7 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->deleteJson('/api/categories/professional')
+        $this->deleteJson('/api/v1/categories/professional')
             ->assertStatus(422)
             ->assertJsonPath('code', 'CATEGORY_PROTECTED')
             ->assertJsonPath('message', 'As categorias padrão não podem ser removidas.');
@@ -200,7 +200,7 @@ class CategoriesTest extends TestCase
         $task = Task::factory()->create(['user_id' => $user->id, 'category' => $category->name]);
         $project = Project::factory()->create(['user_id' => $user->id, 'category' => $category->name]);
 
-        $this->deleteJson('/api/categories/Estudos')
+        $this->deleteJson('/api/v1/categories/Estudos')
             ->assertNoContent();
 
         $this->assertDatabaseMissing('categories', ['id' => $category->id]);
@@ -231,7 +231,7 @@ class CategoriesTest extends TestCase
 
         $user->categories()->create(['name' => 'Estudos Avançados', 'name_key' => 'estudos avançados', 'is_default' => false]);
 
-        $this->deleteJson('/api/categories/estudos%20AVAN%C3%87ADOS')->assertNoContent();
+        $this->deleteJson('/api/v1/categories/estudos%20AVAN%C3%87ADOS')->assertNoContent();
 
         $this->assertDatabaseMissing('categories', ['name_key' => 'estudos avançados']);
     }
@@ -241,7 +241,7 @@ class CategoriesTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->deleteJson('/api/categories/nao-existe')
+        $this->deleteJson('/api/v1/categories/nao-existe')
             ->assertStatus(404)
             ->assertJsonPath('message', 'Não encontrado.');
     }
@@ -255,7 +255,7 @@ class CategoriesTest extends TestCase
 
         $this->switchTo(User::factory()->create());
 
-        $this->deleteJson('/api/categories/Estudos')
+        $this->deleteJson('/api/v1/categories/Estudos')
             ->assertStatus(404);
 
         $this->assertDatabaseHas('categories', ['id' => $category->id]);
@@ -264,9 +264,9 @@ class CategoriesTest extends TestCase
     #[Test]
     public function endpoints_require_authentication(): void
     {
-        $this->getJson('/api/categories')->assertStatus(401)->assertJsonPath('message', 'Não autenticado.');
-        $this->postJson('/api/categories', ['name' => 'Estudos'])->assertStatus(401);
-        $this->deleteJson('/api/categories/Estudos')->assertStatus(401);
+        $this->getJson('/api/v1/categories')->assertStatus(401)->assertJsonPath('message', 'Não autenticado.');
+        $this->postJson('/api/v1/categories', ['name' => 'Estudos'])->assertStatus(401);
+        $this->deleteJson('/api/v1/categories/Estudos')->assertStatus(401);
     }
 
     #[Test]

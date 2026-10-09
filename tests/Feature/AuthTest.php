@@ -54,7 +54,7 @@ class AuthTest extends TestCase
     {
         $user = $this->user();
 
-        $response = $this->postJson('/api/auth/login', $this->credentials());
+        $response = $this->postJson('/api/v1/auth/login', $this->credentials());
 
         $response->assertOk()
             ->assertJsonStructure([
@@ -77,10 +77,10 @@ class AuthTest extends TestCase
     {
         $this->user();
 
-        $token = (string) $this->postJson('/api/auth/login', $this->credentials())->json('token');
+        $token = (string) $this->postJson('/api/v1/auth/login', $this->credentials())->json('token');
 
         $this->withToken($token)
-            ->getJson('/api/auth/me')
+            ->getJson('/api/v1/auth/me')
             ->assertOk()
             ->assertJson([
                 'name' => 'Zua',
@@ -91,7 +91,7 @@ class AuthTest extends TestCase
     #[Test]
     public function login_validates_required_fields(): void
     {
-        $this->postJson('/api/auth/login', [])
+        $this->postJson('/api/v1/auth/login', [])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['email', 'password']);
     }
@@ -99,7 +99,7 @@ class AuthTest extends TestCase
     #[Test]
     public function login_rejects_invalid_email_and_short_password(): void
     {
-        $this->postJson('/api/auth/login', ['email' => 'nao-e-email', 'password' => '123'])
+        $this->postJson('/api/v1/auth/login', ['email' => 'nao-e-email', 'password' => '123'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['email', 'password'])
             ->assertJsonPath('errors.password.0', 'Mínimo de 8 caracteres.');
@@ -110,7 +110,7 @@ class AuthTest extends TestCase
     {
         $this->user();
 
-        $this->postJson('/api/auth/login', [
+        $this->postJson('/api/v1/auth/login', [
             'email' => 'admin@todo.ao',
             'password' => 'erradissima',
         ])
@@ -121,7 +121,7 @@ class AuthTest extends TestCase
     #[Test]
     public function login_with_unknown_email_returns_401_with_same_message(): void
     {
-        $this->postJson('/api/auth/login', [
+        $this->postJson('/api/v1/auth/login', [
             'email' => 'naoexiste@todo.ao',
             'password' => '12345678',
         ])
@@ -135,10 +135,10 @@ class AuthTest extends TestCase
         $this->user();
 
         for ($attempt = 0; $attempt < 5; $attempt++) {
-            $this->postJson('/api/auth/login', $this->credentials())->assertOk();
+            $this->postJson('/api/v1/auth/login', $this->credentials())->assertOk();
         }
 
-        $this->postJson('/api/auth/login', $this->credentials())
+        $this->postJson('/api/v1/auth/login', $this->credentials())
             ->assertStatus(429)
             ->assertJsonPath('message', 'Demasiadas tentativas. Tenta novamente dentro de instantes.');
     }
@@ -148,7 +148,7 @@ class AuthTest extends TestCase
     {
         $user = $this->actingAsUser();
 
-        $this->getJson('/api/auth/me')
+        $this->getJson('/api/v1/auth/me')
             ->assertOk()
             ->assertJson([
                 'id' => $user->id,
@@ -160,7 +160,7 @@ class AuthTest extends TestCase
     #[Test]
     public function me_requires_authentication(): void
     {
-        $this->getJson('/api/auth/me')
+        $this->getJson('/api/v1/auth/me')
             ->assertStatus(401)
             ->assertJsonPath('message', 'Não autenticado.');
     }
@@ -172,7 +172,7 @@ class AuthTest extends TestCase
         $token = $user->createToken('expirado', ['*'], now()->subMinute())->plainTextToken;
 
         $this->withToken($token)
-            ->getJson('/api/auth/me')
+            ->getJson('/api/v1/auth/me')
             ->assertStatus(401)
             ->assertJsonPath('message', 'Não autenticado.');
     }
@@ -182,13 +182,13 @@ class AuthTest extends TestCase
     {
         $user = $this->actingAsUser();
 
-        $this->postJson('/api/auth/logout')->assertNoContent();
+        $this->postJson('/api/v1/auth/logout')->assertNoContent();
 
         $this->assertSame(0, $user->tokens()->count());
 
         $this->forgetAuthGuards();
 
-        $this->getJson('/api/auth/me')
+        $this->getJson('/api/v1/auth/me')
             ->assertStatus(401)
             ->assertJsonPath('message', 'Não autenticado.');
     }
@@ -201,16 +201,16 @@ class AuthTest extends TestCase
         $current = $user->createToken('atual', ['*'])->plainTextToken;
         $other = $user->createToken('outro', ['*'])->plainTextToken;
 
-        $this->withToken($current)->postJson('/api/auth/logout-all')->assertNoContent();
+        $this->withToken($current)->postJson('/api/v1/auth/logout-all')->assertNoContent();
 
         $this->assertSame(0, $user->tokens()->count());
 
         $this->forgetAuthGuards();
 
-        $this->getJson('/api/auth/me', ['Authorization' => 'Bearer '.$current])
+        $this->getJson('/api/v1/auth/me', ['Authorization' => 'Bearer '.$current])
             ->assertStatus(401);
 
-        $this->getJson('/api/auth/me', ['Authorization' => 'Bearer '.$other])
+        $this->getJson('/api/v1/auth/me', ['Authorization' => 'Bearer '.$other])
             ->assertStatus(401);
     }
 
@@ -222,7 +222,7 @@ class AuthTest extends TestCase
         $current = $user->createToken('atual', ['*'])->plainTextToken;
         $other = $user->createToken('outro', ['*'])->plainTextToken;
 
-        $this->withToken($current)->patchJson('/api/auth/password', [
+        $this->withToken($current)->patchJson('/api/v1/auth/password', [
             'currentPassword' => '12345678',
             'password' => 'novaPasse123',
             'passwordConfirmation' => 'novaPasse123',
@@ -233,11 +233,11 @@ class AuthTest extends TestCase
 
         $this->forgetAuthGuards();
 
-        $this->getJson('/api/auth/me', ['Authorization' => 'Bearer '.$current])->assertOk();
+        $this->getJson('/api/v1/auth/me', ['Authorization' => 'Bearer '.$current])->assertOk();
 
         $this->forgetAuthGuards();
 
-        $this->getJson('/api/auth/me', ['Authorization' => 'Bearer '.$other])
+        $this->getJson('/api/v1/auth/me', ['Authorization' => 'Bearer '.$other])
             ->assertStatus(401);
     }
 
@@ -248,7 +248,7 @@ class AuthTest extends TestCase
 
         $this->authenticateAs($user);
 
-        $this->patchJson('/api/auth/password', [
+        $this->patchJson('/api/v1/auth/password', [
             'currentPassword' => 'erradissima',
             'password' => 'novaPasse123',
             'passwordConfirmation' => 'novaPasse123',
@@ -262,7 +262,7 @@ class AuthTest extends TestCase
 
         $this->authenticateAs($user);
 
-        $this->patchJson('/api/auth/password', [
+        $this->patchJson('/api/v1/auth/password', [
             'currentPassword' => '12345678',
             'password' => 'novaPasse123',
             'passwordConfirmation' => 'diferente123',
@@ -276,7 +276,7 @@ class AuthTest extends TestCase
 
         $this->authenticateAs($user);
 
-        $this->patchJson('/api/auth/password', [
+        $this->patchJson('/api/v1/auth/password', [
             'currentPassword' => '12345678',
             'password' => '123',
             'passwordConfirmation' => '123',
@@ -289,7 +289,7 @@ class AuthTest extends TestCase
     #[Test]
     public function password_requires_authentication(): void
     {
-        $this->patchJson('/api/auth/password', [
+        $this->patchJson('/api/v1/auth/password', [
             'currentPassword' => '12345678',
             'password' => 'novaPasse123',
             'passwordConfirmation' => 'novaPasse123',

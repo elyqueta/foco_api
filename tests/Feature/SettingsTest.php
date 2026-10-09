@@ -25,7 +25,7 @@ class SettingsTest extends TestCase
             'timezone' => 'Africa/Luanda',
         ]);
 
-        $this->getJson('/api/settings')
+        $this->getJson('/api/v1/settings')
             ->assertOk()
             ->assertJsonStructure([
                 'userName',
@@ -67,7 +67,7 @@ class SettingsTest extends TestCase
             'timezone' => 'Africa/Luanda',
         ]);
 
-        $this->patchJson('/api/settings', [
+        $this->patchJson('/api/v1/settings', [
             'userName' => 'Zua Manuel',
             'theme' => 'dark',
             'timezone' => 'Europe/Lisbon',
@@ -95,7 +95,7 @@ class SettingsTest extends TestCase
             'timezone' => 'Africa/Luanda',
         ]);
 
-        $this->patchJson('/api/settings', ['theme' => 'light'])
+        $this->patchJson('/api/v1/settings', ['theme' => 'light'])
             ->assertOk()
             ->assertJson([
                 'userName' => 'Zua',
@@ -115,7 +115,7 @@ class SettingsTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->patchJson('/api/settings', ['timezone' => 'Nao/Existe'])
+        $this->patchJson('/api/v1/settings', ['timezone' => 'Nao/Existe'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['timezone']);
     }
@@ -125,7 +125,7 @@ class SettingsTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->patchJson('/api/settings', ['theme' => 'azul'])
+        $this->patchJson('/api/v1/settings', ['theme' => 'azul'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['theme']);
     }
@@ -135,7 +135,7 @@ class SettingsTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->patchJson('/api/settings', ['userName' => 'Z'])
+        $this->patchJson('/api/v1/settings', ['userName' => 'Z'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['userName']);
     }
@@ -145,7 +145,7 @@ class SettingsTest extends TestCase
     {
         $user = $this->actingAsUser();
 
-        $this->patchJson('/api/settings', [
+        $this->patchJson('/api/v1/settings', [
             'notifications' => [
                 'emailEnabled' => false,
                 'inAppEnabled' => true,
@@ -192,7 +192,7 @@ class SettingsTest extends TestCase
     {
         $user = $this->actingAsUser();
 
-        $this->patchJson('/api/settings', [
+        $this->patchJson('/api/v1/settings', [
             'notifications' => [
                 'types' => ['task_completed' => ['email' => true]],
             ],
@@ -209,7 +209,7 @@ class SettingsTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->patchJson('/api/settings', [
+        $this->patchJson('/api/v1/settings', [
             'notifications' => [
                 'types' => ['tipo_inexistente' => ['email' => true]],
             ],
@@ -223,7 +223,7 @@ class SettingsTest extends TestCase
     {
         $user = $this->actingAsUser();
 
-        $this->patchJson('/api/settings', [
+        $this->patchJson('/api/v1/settings', [
             'notifications' => [
                 'types' => [
                     'task_completed' => ['email' => true, 'inApp' => false, 'sms' => true],
@@ -243,7 +243,7 @@ class SettingsTest extends TestCase
     {
         $this->actingAsUser();
 
-        $this->patchJson('/api/settings', [
+        $this->patchJson('/api/v1/settings', [
             'notifications' => [
                 'digestHour' => 25,
                 'dueSoonHours' => 0,
@@ -263,11 +263,11 @@ class SettingsTest extends TestCase
     #[Test]
     public function settings_require_authentication(): void
     {
-        $this->getJson('/api/settings')
+        $this->getJson('/api/v1/settings')
             ->assertStatus(401)
             ->assertJsonPath('message', 'Não autenticado.');
 
-        $this->patchJson('/api/settings', ['theme' => 'dark'])
+        $this->patchJson('/api/v1/settings', ['theme' => 'dark'])
             ->assertStatus(401)
             ->assertJsonPath('message', 'Não autenticado.');
     }

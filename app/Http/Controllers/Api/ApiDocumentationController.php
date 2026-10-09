@@ -15,13 +15,13 @@ class ApiDocumentationController
             'info' => [
                 'title' => config('app.name', 'Foco API').' — v1',
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints da **versão v1** da API Foco. A versão vive na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`) e não no URL: a v1 não tem prefixo, como exige o contrato (`contrato-api.md`); mudanças incompatíveis irão para `/api/v2`. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login` e `health`.',
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
             ],
             'servers' => [
-                ['url' => '/api', 'description' => 'Base única da API v1 (contrato e endpoints de sistema; sem prefixo de versão)'],
+                ['url' => '/api', 'description' => 'Base da API: rotas de domínio em /api/v1/*, sistema em /api/*'],
             ],
             'paths' => [
-                '/auth/login' => [
+                '/v1/auth/login' => [
                     'post' => [
                         'summary' => 'Login',
                         'description' => 'Autentica o utilizador e devolve um token Sanctum com expiração de 7 dias.',
@@ -77,7 +77,62 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/auth/logout' => [
+                '/v1/auth/register' => [
+                    'post' => [
+                        'summary' => 'Registar utilizador',
+                        'description' => 'Auto-registo público. Cria a conta, provisiona as 3 categorias padrão (elimináveis, sem projetos nem tarefas) e devolve o token — o utilizador fica autenticado.',
+                        'operationId' => 'register',
+                        'tags' => ['Auth'],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['name', 'email', 'password', 'passwordConfirmation'],
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60],
+                                            'email' => ['type' => 'string', 'format' => 'email'],
+                                            'password' => ['type' => 'string', 'format' => 'password', 'minLength' => 8],
+                                            'passwordConfirmation' => ['type' => 'string', 'format' => 'password', 'minLength' => 8],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Utilizador criado e autenticado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'token' => ['type' => 'string'],
+                                                'user' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'id' => ['type' => 'integer'],
+                                                        'name' => ['type' => 'string'],
+                                                        'email' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                                'expires_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '422' => [
+                                'description' => 'Dados inválidos ou email já registado.',
+                            ],
+                            '429' => [
+                                'description' => 'Demasiadas tentativas (5 por minuto por IP).',
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/auth/logout' => [
                     'post' => [
                         'summary' => 'Logout',
                         'description' => 'Revoga o token actual.',
@@ -90,7 +145,7 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/auth/logout-all' => [
+                '/v1/auth/logout-all' => [
                     'post' => [
                         'summary' => 'Logout em todos os dispositivos',
                         'description' => 'Revoga todos os tokens do utilizador.',
@@ -103,7 +158,7 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/auth/me' => [
+                '/v1/auth/me' => [
                     'get' => [
                         'summary' => 'Utilizador autenticado',
                         'description' => 'Devolve os dados do utilizador associado ao token Sanctum.',
@@ -130,7 +185,7 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/auth/password' => [
+                '/v1/auth/password' => [
                     'patch' => [
                         'summary' => 'Alterar palavra-passe',
                         'description' => 'Altera a palavra-passe do utilizador e revoga os outros tokens.',
@@ -159,7 +214,7 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/settings' => [
+                '/v1/settings' => [
                     'get' => [
                         'summary' => 'Definições do utilizador',
                         'description' => 'Devolve nome, tema, fuso horário e preferências de notificação.',
@@ -199,7 +254,7 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/categories' => [
+                '/v1/categories' => [
                     'get' => [
                         'summary' => 'Listar categorias',
                         'description' => 'Categorias do utilizador autenticado, padrão primeiro e depois ordem alfabética, com contagens de tarefas e projetos.',
@@ -271,7 +326,7 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
-                '/categories/{name}' => [
+                '/v1/categories/{name}' => [
                     'delete' => [
                         'summary' => 'Remover categoria',
                         'description' => 'Remove uma categoria personalizada. As tarefas e projetos do utilizador nessa categoria passam para `professional`. Categorias padrão não podem ser removidas.',
