@@ -72,6 +72,6 @@ class CategoryController extends Controller
 
         app(RemoveCategory::class)->handle($user, $category);
 
-        return response()->json(null, 204);
+        return response()->json(['message' => 'Categoria removida.'], 200);
     }
 }

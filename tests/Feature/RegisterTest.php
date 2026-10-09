@@ -150,8 +150,8 @@ class RegisterTest extends TestCase
 
         $this->authenticateAs($user);
 
-        $this->deleteJson('/api/v1/categories/professional')->assertNoContent();
-        $this->deleteJson('/api/v1/categories/personal')->assertNoContent();
+        $this->deleteJson('/api/v1/categories/professional')->assertOk()->assertJsonPath('message', 'Categoria removida.');
+        $this->deleteJson('/api/v1/categories/personal')->assertOk()->assertJsonPath('message', 'Categoria removida.');
 
         $this->assertSame(['household'], $user->categories()->pluck('name')->all());
     }
@@ -167,7 +167,7 @@ class RegisterTest extends TestCase
 
         $this->authenticateAs($user);
 
-        $this->deleteJson('/api/v1/categories/professional')->assertNoContent();
+        $this->deleteJson('/api/v1/categories/professional')->assertOk()->assertJsonPath('message', 'Categoria removida.');
 
         $this->assertNotSame('professional', $task->fresh()->category);
         $this->assertContains($task->fresh()->category, ['household', 'personal']);
@@ -192,9 +192,9 @@ class RegisterTest extends TestCase
 
         $this->authenticateAs($user);
 
-        $this->deleteJson('/api/v1/categories/household')->assertNoContent();
-        $this->deleteJson('/api/v1/categories/personal')->assertNoContent();
-        $this->deleteJson('/api/v1/categories/professional')->assertNoContent();
+        $this->deleteJson('/api/v1/categories/household')->assertOk()->assertJsonPath('message', 'Categoria removida.');
+        $this->deleteJson('/api/v1/categories/personal')->assertOk()->assertJsonPath('message', 'Categoria removida.');
+        $this->deleteJson('/api/v1/categories/professional')->assertOk()->assertJsonPath('message', 'Categoria removida.');
 
         $categories = $user->categories()->get();
 

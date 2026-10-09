@@ -178,11 +178,21 @@ class AuthTest extends TestCase
     }
 
     #[Test]
+    public function unauthenticated_request_without_accept_header_returns_json_401(): void
+    {
+        // Sem `Accept: application/json` o middleware de auth tentava
+        // redireccionar para a rota `login` (inexistente) → 500. Regressão.
+        $this->get('/api/v1/auth/me')
+            ->assertStatus(401)
+            ->assertJsonPath('message', 'Não autenticado.');
+    }
+
+    #[Test]
     public function logout_revokes_current_token(): void
     {
         $user = $this->actingAsUser();
 
-        $this->postJson('/api/v1/auth/logout')->assertNoContent();
+        $this->postJson('/api/v1/auth/logout')->assertOk()->assertJsonPath('message', 'Sessão terminada.');
 
         $this->assertSame(0, $user->tokens()->count());
 
@@ -201,7 +211,7 @@ class AuthTest extends TestCase
         $current = $user->createToken('atual', ['*'])->plainTextToken;
         $other = $user->createToken('outro', ['*'])->plainTextToken;
 
-        $this->withToken($current)->postJson('/api/v1/auth/logout-all')->assertNoContent();
+        $this->withToken($current)->postJson('/api/v1/auth/logout-all')->assertOk()->assertJsonPath('message', 'Sessão terminada em todos os dispositivos.');
 
         $this->assertSame(0, $user->tokens()->count());
 
@@ -226,7 +236,7 @@ class AuthTest extends TestCase
             'currentPassword' => '12345678',
             'password' => 'novaPasse123',
             'passwordConfirmation' => 'novaPasse123',
-        ])->assertNoContent();
+        ])->assertOk()->assertJsonPath('message', 'Palavra-passe alterada.');
 
         $this->assertTrue(Hash::check('novaPasse123', (string) $user->fresh()->password));
         $this->assertSame(1, $user->tokens()->count());

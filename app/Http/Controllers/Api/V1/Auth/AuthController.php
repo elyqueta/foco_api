@@ -100,7 +100,7 @@ class AuthController extends Controller
     {
         $request->user()?->currentAccessToken()?->delete();
 
-        return response()->json(null, 204);
+        return response()->json(['message' => 'Sessão terminada.'], 200);
     }
 
     public function logoutAll(Request $request): JsonResponse
@@ -109,7 +109,7 @@ class AuthController extends Controller
 
         $user?->tokens()->delete();
 
-        return response()->json(null, 204);
+        return response()->json(['message' => 'Sessão terminada em todos os dispositivos.'], 200);
     }
 
     public function me(Request $request): JsonResponse
@@ -135,7 +135,7 @@ class AuthController extends Controller
             });
         }
 
-        return response()->json(null, 204);
+        return response()->json(['message' => 'Palavra-passe alterada.'], 200);
     }
 
     /**
@@ -182,7 +182,7 @@ class AuthController extends Controller
             }
         });
 
-        return response()->json(null, 204);
+        return response()->json(['message' => 'Perfil atualizado.'], 200);
     }
 
     /**

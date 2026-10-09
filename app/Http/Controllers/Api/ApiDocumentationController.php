@@ -140,7 +140,19 @@ class ApiDocumentationController
                         'tags' => ['Auth'],
                         'security' => [['bearerAuth' => []]],
                         'responses' => [
-                            '204' => ['description' => 'Sessão terminada.'],
+                            '200' => [
+                                'description' => 'Sessão terminada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Sessão terminada.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
                         ],
                     ],
@@ -153,7 +165,19 @@ class ApiDocumentationController
                         'tags' => ['Auth'],
                         'security' => [['bearerAuth' => []]],
                         'responses' => [
-                            '204' => ['description' => 'Todos os tokens revogados.'],
+                            '200' => [
+                                'description' => 'Sessão terminada em todos os dispositivos.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Sessão terminada em todos os dispositivos.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
                         ],
                     ],
@@ -209,7 +233,19 @@ class ApiDocumentationController
                             ],
                         ],
                         'responses' => [
-                            '204' => ['description' => 'Palavra-passe alterada.'],
+                            '200' => [
+                                'description' => 'Palavra-passe alterada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Palavra-passe alterada.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                             '422' => ['description' => 'Dados inválidos ou palavra-passe actual incorreta.'],
                         ],
                     ],
@@ -237,7 +273,19 @@ class ApiDocumentationController
                             ],
                         ],
                         'responses' => [
-                            '204' => ['description' => 'Perfil atualizado.'],
+                            '200' => [
+                                'description' => 'Perfil atualizado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Perfil atualizado.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
                             '422' => [
                                 'description' => 'Dados inválidos, email já registado ou palavra-passe atual incorreta.',
@@ -374,7 +422,19 @@ class ApiDocumentationController
                             ],
                         ],
                         'responses' => [
-                            '204' => ['description' => 'Categoria removida.'],
+                            '200' => [
+                                'description' => 'Categoria removida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Categoria removida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
                             '404' => ['description' => 'Categoria inexistente.'],
                             '422' => ['description' => 'Categoria padrão (code CATEGORY_PROTECTED).'],

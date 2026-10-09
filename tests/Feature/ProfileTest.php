@@ -22,7 +22,7 @@ class ProfileTest extends TestCase
         $user = $this->actingAsUser();
 
         $this->patchJson('/api/v1/auth/profile', ['name' => 'Nome Novo'])
-            ->assertNoContent();
+            ->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
 
         $this->assertSame('Nome Novo', $user->fresh()->name);
         $this->assertSame(0, EmailChangeLog::where('user_id', $user->id)->count());
@@ -36,7 +36,7 @@ class ProfileTest extends TestCase
         $this->patchJson('/api/v1/auth/profile', [
             'email' => 'depois.da.mudanca@todo.ao',
             'currentPassword' => 'password',
-        ])->assertNoContent();
+        ])->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
 
         $this->assertSame('depois.da.mudanca@todo.ao', $user->fresh()->email);
 
@@ -55,7 +55,7 @@ class ProfileTest extends TestCase
         $this->patchJson('/api/v1/auth/profile', [
             'email' => 'depois@todo.ao',
             'currentPassword' => 'password',
-        ])->assertNoContent();
+        ])->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
 
         $log = EmailChangeLog::where('user_id', $user->id)->latest('id')->firstOrFail();
 
@@ -73,7 +73,7 @@ class ProfileTest extends TestCase
             $this->patchJson('/api/v1/auth/profile', [
                 'email' => $email,
                 'currentPassword' => 'password',
-            ])->assertNoContent();
+            ])->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
         }
 
         $logs = EmailChangeLog::where('user_id', $user->id)->oldest('id')->get();
@@ -95,7 +95,7 @@ class ProfileTest extends TestCase
             'name' => 'Nome e Email',
             'email' => 'combinado@todo.ao',
             'currentPassword' => 'password',
-        ])->assertNoContent();
+        ])->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
 
         $this->assertSame('Nome e Email', $user->fresh()->name);
         $this->assertSame('combinado@todo.ao', $user->fresh()->email);
@@ -158,7 +158,7 @@ class ProfileTest extends TestCase
         $this->patchJson('/api/v1/auth/profile', [
             'email' => 'igual@todo.ao',
             'currentPassword' => 'password',
-        ])->assertNoContent();
+        ])->assertOk()->assertJsonPath('message', 'Perfil atualizado.');
 
         $this->assertSame(0, EmailChangeLog::where('user_id', $user->id)->count());
     }

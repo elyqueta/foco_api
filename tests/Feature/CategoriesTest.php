@@ -201,7 +201,7 @@ class CategoriesTest extends TestCase
         $project = Project::factory()->create(['user_id' => $user->id, 'category' => $category->name]);
 
         $this->deleteJson('/api/v1/categories/Estudos')
-            ->assertNoContent();
+            ->assertOk()->assertJsonPath('message', 'Categoria removida.');
 
         $this->assertDatabaseMissing('categories', ['id' => $category->id]);
         $this->assertDatabaseHas('tasks', ['id' => $task->id, 'category' => 'professional']);
@@ -231,7 +231,7 @@ class CategoriesTest extends TestCase
 
         $user->categories()->create(['name' => 'Estudos Avançados', 'name_key' => 'estudos avançados', 'is_default' => false]);
 
-        $this->deleteJson('/api/v1/categories/estudos%20AVAN%C3%87ADOS')->assertNoContent();
+        $this->deleteJson('/api/v1/categories/estudos%20AVAN%C3%87ADOS')->assertOk()->assertJsonPath('message', 'Categoria removida.');
 
         $this->assertDatabaseMissing('categories', ['name_key' => 'estudos avançados']);
     }

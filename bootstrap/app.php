@@ -19,6 +19,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
+
+        // App API-only: não existe rota `login` para redireccionar. Sem isto,
+        // um pedido sem Accept: application/json e sem token faz
+        // `route('login')` lançar RouteNotFoundException → 500 com stack
+        // trace em vez de 401 JSON.
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
