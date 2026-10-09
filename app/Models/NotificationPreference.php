@@ -11,6 +11,8 @@ class NotificationPreference extends Model
 {
     protected $table = 'notification_preferences';
 
+    protected $primaryKey = 'user_id';
+
     protected $keyType = 'int';
 
     public $incrementing = false;
@@ -43,9 +45,12 @@ class NotificationPreference extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function typesWithDefaults(): array
+    /**
+     * @return array<string, array{email: bool, inApp: bool}>
+     */
+    public static function defaultTypes(): array
     {
-        $defaults = [
+        return [
             'daily_digest' => ['email' => true, 'inApp' => true],
             'task_due_soon' => ['email' => true, 'inApp' => true],
             'task_due_imminent' => ['email' => true, 'inApp' => true],
@@ -58,10 +63,29 @@ class NotificationPreference extends Model
             'project_ready_to_complete' => ['email' => false, 'inApp' => true],
             'task_overdue_postponed' => ['email' => false, 'inApp' => true],
         ];
+    }
 
-        $stored = $this->types ?? [];
+    /**
+     * Valores por omissão das colunas (fonte única para criação e leitura).
+     *
+     * @return array<string, mixed>
+     */
+    public static function defaultAttributes(): array
+    {
+        return [
+            'email_enabled' => true,
+            'in_app_enabled' => true,
+            'digest_hour' => 8,
+            'due_soon_hours' => 24,
+            'due_imminent_minutes' => 60,
+            'timer_long_hours' => 4,
+            'types' => [],
+        ];
+    }
 
-        return array_replace_recursive($defaults, $stored);
+    public function typesWithDefaults(): array
+    {
+        return array_replace_recursive(static::defaultTypes(), $this->types ?? []);
     }
 
     public function channelEnabled(string $type, string $channel): bool

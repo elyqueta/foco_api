@@ -168,4 +168,39 @@ class ProductionSeederTest extends TestCase
         $this->assertEquals(2, $user->projects()->count());
         $this->assertEquals(4, $user->tasks()->count());
     }
+
+    #[Test]
+    public function database_seeder_creates_demo_user_in_local_or_testing(): void
+    {
+        $this->setSeedEnv([
+            'SEED_ADMIN_NAME' => '',
+            'SEED_ADMIN_EMAIL' => '',
+            'SEED_ADMIN_PASSWORD' => '',
+        ]);
+
+        $this->artisan('db:seed', ['--class' => 'Database\Seeders\DatabaseSeeder']);
+
+        $this->assertEquals(1, User::count());
+        $user = User::first();
+        $this->assertEquals('Zua', $user->name);
+        $this->assertEquals('admin@todo.ao', $user->email);
+        $this->assertTrue(Hash::check('12345678', $user->password));
+    }
+
+    #[Test]
+    public function demo_data_is_created_for_the_seeded_user_and_not_another_admin(): void
+    {
+        $this->setSeedEnv([
+            'SEED_ADMIN_NAME' => 'Outro',
+            'SEED_ADMIN_EMAIL' => 'other@admin.com',
+            'SEED_ADMIN_PASSWORD' => 'password123',
+            'SEED_DEMO_DATA' => 'true',
+        ]);
+
+        $this->artisan('db:seed', ['--class' => 'Database\Seeders\ProductionSeeder']);
+
+        $user = User::whereEmail('other@admin.com')->firstOrFail();
+        $this->assertEquals(2, $user->projects()->count());
+        $this->assertEquals(4, $user->tasks()->count());
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions\Users;
 
+use App\Models\NotificationPreference;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -31,15 +32,7 @@ class ProvisionUserDefaults
 
             $user->notificationPreference()->firstOrCreate(
                 ['user_id' => $user->id],
-                [
-                    'email_enabled' => true,
-                    'in_app_enabled' => true,
-                    'digest_hour' => 8,
-                    'due_soon_hours' => 24,
-                    'due_imminent_minutes' => 60,
-                    'timer_long_hours' => 4,
-                    'types' => [],
-                ],
+                NotificationPreference::defaultAttributes(),
             );
         });
     }

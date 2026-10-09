@@ -48,7 +48,7 @@ class ProductionSeeder extends Seeder
         app(ProvisionUserDefaults::class)->handle($user);
 
         if (filter_var(env('SEED_DEMO_DATA', false), FILTER_VALIDATE_BOOL) === true) {
-            $this->callWith(DemoDataSeeder::class, [$user]);
+            $this->callWith(DemoDataSeeder::class, ['user' => $user]);
         }
     }
 }

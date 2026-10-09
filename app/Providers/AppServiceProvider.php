@@ -11,8 +11,10 @@ use App\Models\User;
 use App\Observers\UserObserver;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,6 +26,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Relation::enforceMorphMap([
+            'user' => User::class,
             'task' => Task::class,
             'project' => Project::class,
             'activity' => ActivityEntry::class,
@@ -31,8 +34,16 @@ class AppServiceProvider extends ServiceProvider
 
         User::observe(UserObserver::class);
 
+        JsonResource::withoutWrapping();
+
         RateLimiter::for('api', function ($request) {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+        });
+
+        RateLimiter::for('login', function ($request) {
+            return Limit::perMinute(5)->by(
+                Str::lower((string) $request->input('email')).'|'.$request->ip()
+            );
         });
     }
 }

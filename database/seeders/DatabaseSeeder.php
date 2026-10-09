@@ -27,6 +27,12 @@ class DatabaseSeeder extends Seeder
             $password = (is_string($password) && $password !== '') ? $password : '12345678';
         }
 
-        $this->callWith(ProductionSeeder::class, [$name, $email, $password]);
+        // Parâmetros nomeados: o contentor resolve os argumentos do run() por nome,
+        // pelo que uma lista posicional seria silenciosamente descartada.
+        $this->callWith(ProductionSeeder::class, [
+            'name' => $name,
+            'email' => $email,
+            'password' => $password,
+        ]);
     }
 }

@@ -16,11 +16,20 @@ class ApiDocumentationTest extends TestCase
                 'openapi',
                 'info' => ['title', 'version'],
                 'servers',
-                'paths' => ['/', '/health', '/user', '/login'],
+                'paths' => [
+                    '/',
+                    '/health',
+                    '/auth/login',
+                    '/auth/logout',
+                    '/auth/logout-all',
+                    '/auth/me',
+                    '/auth/password',
+                    '/settings',
+                ],
                 'components' => ['securitySchemes' => ['bearerAuth']],
             ])
             ->assertJsonPath('openapi', '3.0.3')
-            ->assertJsonPath('paths./user.get.security.0.bearerAuth', []);
+            ->assertJsonPath('paths./auth/me.get.security.0.bearerAuth', []);
     }
 
     public function test_swagger_ui_is_available_at_docs(): void
