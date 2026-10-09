@@ -13,12 +13,12 @@ class ApiDocumentationController
         $spec = [
             'openapi' => '3.0.3',
             'info' => [
-                'title' => config('app.name', 'Foco API'),
+                'title' => config('app.name', 'Foco API').' — v1',
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints actualmente disponíveis na API Foco. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login` e `health`. A versão (v1) vive na estrutura do código; o URL não tem prefixo de versão.',
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão vive na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`) e não no URL: a v1 não tem prefixo, como exige o contrato (`contrato-api.md`); mudanças incompatíveis irão para `/api/v2`. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login` e `health`.',
             ],
             'servers' => [
-                ['url' => '/api', 'description' => 'Base única da API (contrato e endpoints de sistema)'],
+                ['url' => '/api', 'description' => 'Base única da API v1 (contrato e endpoints de sistema; sem prefixo de versão)'],
             ],
             'paths' => [
                 '/auth/login' => [
