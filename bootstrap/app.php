@@ -1,5 +1,7 @@
 <?php
 
+use App\Exceptions\DomainRuleException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,9 +22,16 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
 
-        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, Request $request) {
+        $exceptions->render(function (DomainRuleException $e, Request $request) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'code' => $e->code,
+            ], $e->status);
+        });
+
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
-                return response()->json(['message' => 'Unauthenticated'], 401);
+                return response()->json(['message' => 'Não autenticado.'], 401);
             }
         });
     })->create();

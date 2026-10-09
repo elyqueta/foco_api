@@ -21,7 +21,7 @@ class LoginController extends Controller
 
         $user = Auth::getProvider()->retrieveByCredentials(['email' => $request->email]);
 
-        if (!$user || !Auth::getProvider()->validateCredentials($user, ['password' => $request->password])) {
+        if (! $user || ! Auth::getProvider()->validateCredentials($user, ['password' => $request->password])) {
             throw ValidationException::withMessages([
                 'email' => ['As credenciais fornecidas estão incorretas.'],
             ]);
