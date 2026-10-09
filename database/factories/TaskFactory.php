@@ -24,8 +24,8 @@ class TaskFactory extends Factory
         return [
             'user_id' => User::factory(),
             'project_id' => null,
-            'title' => $this->faker->catchWord().' '.$this->faker->catchWord(),
-            'description' => $this->faker->optional()->sentence(),
+            'title' => $this->faker->word().' '.$this->faker->word(),
+            'description' => $this->faker->sentence(),
             'category' => 'professional',
             'urgency' => 'medium',
             'status' => 'todo',

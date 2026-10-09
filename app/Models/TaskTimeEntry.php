@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Database\Factories\TaskTimeEntryFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TaskTimeEntry extends Model
 {
-    use HasUuids;
+    /** @use HasFactory<TaskTimeEntryFactory> */
+    use HasFactory, HasUuids;
 
     protected $table = 'task_time_entries';
 

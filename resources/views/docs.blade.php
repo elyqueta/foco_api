@@ -10,7 +10,7 @@
     </style>
 </head>
 <body>
-    <redoc spec-url="/api/v1/docs.json"></redoc>
+    <redoc spec-url="/api/docs.json"></redoc>
     <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.3/bundles/redoc.standalone.js"></script>
 </body>
 </html>

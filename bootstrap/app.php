@@ -2,11 +2,13 @@
 
 use App\Exceptions\DomainRuleException;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -26,8 +28,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (DomainRuleException $e, Request $request) {
             return response()->json([
                 'message' => $e->getMessage(),
-                'code' => $e->code,
+                'code' => $e->errorCode,
             ], $e->status);
+        });
+
+        // Contrato: 404 → { "message": "Não encontrado." } em JSON.
+        $exceptions->render(function (ModelNotFoundException|NotFoundHttpException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json(['message' => 'Não encontrado.'], 404);
+            }
         });
 
         $exceptions->render(function (AuthenticationException $e, Request $request) {

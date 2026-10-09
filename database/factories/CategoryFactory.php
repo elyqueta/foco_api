@@ -17,12 +17,12 @@ class CategoryFactory extends Factory
 
     public function definition(): array
     {
-        $name = $this->faker->randomElement(['Professional', 'Pessoal', 'Casa', 'Estudos', 'Saúde']);
+        $name = $this->faker->randomElement(['Estudos', 'Saúde', 'Finanças', 'Voluntariado', 'Leituras']);
 
         return [
             'user_id' => User::factory(),
             'name' => $name,
-            'name_key' => strtolower($name),
+            'name_key' => Category::nameKey($name),
             'is_default' => false,
         ];
     }

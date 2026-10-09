@@ -10,10 +10,14 @@ use Illuminate\Support\Facades\DB;
 
 class ProvisionUserDefaults
 {
+    /**
+     * Nomes iguais às chaves (`name_key`) para coincidir com os valores que o
+     * front guarda em `task.category`/`project.category` (doc 00 §3).
+     */
     public const DEFAULT_CATEGORIES = [
-        ['name' => 'Professional', 'name_key' => 'professional', 'is_default' => true],
-        ['name' => 'Pessoal', 'name_key' => 'personal', 'is_default' => true],
-        ['name' => 'Casa', 'name_key' => 'household', 'is_default' => true],
+        ['name' => 'professional', 'name_key' => 'professional', 'is_default' => true],
+        ['name' => 'personal', 'name_key' => 'personal', 'is_default' => true],
+        ['name' => 'household', 'name_key' => 'household', 'is_default' => true],
     ];
 
     /**

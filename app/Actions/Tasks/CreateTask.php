@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Actions\Tasks;
 
 use App\Actions\ActivityLog;
+use App\Actions\Categories\ResolveCategory;
 use App\Enums\ActivityType;
 use App\Enums\TaskStatus;
 use App\Enums\Urgency;
 use App\Exceptions\DomainRuleException;
-use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\UserClock;
@@ -89,10 +89,7 @@ class CreateTask
             );
         }
 
-        $category = trim((string) ($data['category'] ?? 'professional'));
-        if ($category === '') {
-            $category = 'professional';
-        }
+        $category = app(ResolveCategory::class)->canonicalName($user, (string) ($data['category'] ?? ''));
 
         $urgency = $data['urgency'] ?? 'medium';
         if (! $urgency instanceof Urgency) {
@@ -106,7 +103,7 @@ class CreateTask
 
         $projectId = $data['projectId'] ?? $data['project_id'] ?? null;
         if (is_string($projectId) && $projectId !== '') {
-            if (! Project::whereId($projectId)->exists()) {
+            if (! $user->projects()->whereKey($projectId)->exists()) {
                 throw new DomainRuleException(
                     'PROJECT_NOT_FOUND',
                     'Projeto não encontrado.',

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Resources;
+namespace App\Http\Resources\V1;
 
 use App\Models\NotificationPreference;
 use App\Models\User;

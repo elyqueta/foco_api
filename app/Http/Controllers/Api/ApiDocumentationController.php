@@ -5,15 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\JsonResponse;
-use Illuminate\View\View;
 
 class ApiDocumentationController
 {
-    public function ui(): View
-    {
-        return view('docs');
-    }
-
     public function openApi(): JsonResponse
     {
         $spec = [
@@ -21,11 +15,10 @@ class ApiDocumentationController
             'info' => [
                 'title' => config('app.name', 'Foco API'),
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints actualmente disponíveis na API Foco. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login` e `health`.',
+                'description' => 'Endpoints actualmente disponíveis na API Foco. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login` e `health`. A versão (v1) vive na estrutura do código; o URL não tem prefixo de versão.',
             ],
             'servers' => [
-                ['url' => '/api', 'description' => 'Base do contrato (auth e definições)'],
-                ['url' => '/api/v1', 'description' => 'Endpoints de sistema (health, documentação)'],
+                ['url' => '/api', 'description' => 'Base única da API (contrato e endpoints de sistema)'],
             ],
             'paths' => [
                 '/auth/login' => [
@@ -203,6 +196,102 @@ class ApiDocumentationController
                         'responses' => [
                             '200' => ['description' => 'Definições actualizadas.'],
                             '422' => ['description' => 'Dados inválidos.'],
+                        ],
+                    ],
+                ],
+                '/categories' => [
+                    'get' => [
+                        'summary' => 'Listar categorias',
+                        'description' => 'Categorias do utilizador autenticado, padrão primeiro e depois ordem alfabética, com contagens de tarefas e projetos.',
+                        'operationId' => 'listCategories',
+                        'tags' => ['Categorias'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de categorias.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => [
+                                                'type' => 'object',
+                                                'properties' => [
+                                                    'name' => ['type' => 'string', 'example' => 'Estudos'],
+                                                    'isDefault' => ['type' => 'boolean'],
+                                                    'tasksCount' => ['type' => 'integer'],
+                                                    'projectsCount' => ['type' => 'integer'],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                    'post' => [
+                        'summary' => 'Criar categoria',
+                        'description' => 'Cria uma categoria personalizada. Nome: 2–60 caracteres, sem duplicados (comparação insensível a maiúsculas e espaços).',
+                        'operationId' => 'createCategory',
+                        'tags' => ['Categorias'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['name'],
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60, 'example' => 'Estudos'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Categoria criada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'name' => ['type' => 'string'],
+                                                'isDefault' => ['type' => 'boolean', 'example' => false],
+                                                'tasksCount' => ['type' => 'integer', 'example' => 0],
+                                                'projectsCount' => ['type' => 'integer', 'example' => 0],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Nome inválido ou já existente.'],
+                        ],
+                    ],
+                ],
+                '/categories/{name}' => [
+                    'delete' => [
+                        'summary' => 'Remover categoria',
+                        'description' => 'Remove uma categoria personalizada. As tarefas e projetos do utilizador nessa categoria passam para `professional`. Categorias padrão não podem ser removidas.',
+                        'operationId' => 'deleteCategory',
+                        'tags' => ['Categorias'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'name',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'Nome da categoria (URL-encoded; resolvido independentemente de maiúsculas/espaços).',
+                                'schema' => ['type' => 'string', 'example' => 'Estudos'],
+                            ],
+                        ],
+                        'responses' => [
+                            '204' => ['description' => 'Categoria removida.'],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Categoria inexistente.'],
+                            '422' => ['description' => 'Categoria padrão (code CATEGORY_PROTECTED).'],
                         ],
                     ],
                 ],

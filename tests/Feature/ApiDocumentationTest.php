@@ -10,7 +10,7 @@ class ApiDocumentationTest extends TestCase
 {
     public function test_openapi_json_is_available_at_docs_json_route(): void
     {
-        $this->get('/api/v1/docs.json')
+        $this->get('/api/docs.json')
             ->assertOk()
             ->assertJsonStructure([
                 'openapi',
@@ -25,6 +25,8 @@ class ApiDocumentationTest extends TestCase
                     '/auth/me',
                     '/auth/password',
                     '/settings',
+                    '/categories',
+                    '/categories/{name}',
                 ],
                 'components' => ['securitySchemes' => ['bearerAuth']],
             ])
@@ -38,6 +40,6 @@ class ApiDocumentationTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertSee('Foco API Docs');
-        $response->assertSee('/api/v1/docs');
+        $response->assertSee('/api/docs');
     }
 }

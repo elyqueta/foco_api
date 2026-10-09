@@ -19,8 +19,8 @@ class ProjectFactory extends Factory
     {
         return [
             'user_id' => User::factory(),
-            'name' => $this->faker->catchWord().' '.$this->faker->catchWord(),
-            'description' => $this->faker->optional()->sentence(),
+            'name' => $this->faker->word().' '.$this->faker->word(),
+            'description' => $this->faker->sentence(),
             'category' => 'professional',
             'urgency' => 'medium',
             'status' => 'active',

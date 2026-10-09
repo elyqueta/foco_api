@@ -20,7 +20,7 @@ class CorsTest extends TestCase
         $response = $this->withHeaders([
             'Origin' => 'http://localhost:4200',
             'Access-Control-Request-Method' => 'POST',
-        ])->options('/api/v1/health');
+        ])->options('/api/health');
 
         $response->assertStatus(204);
         $response->assertHeader('Access-Control-Allow-Origin', 'http://localhost:4200');

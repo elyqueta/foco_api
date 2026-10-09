@@ -7,8 +7,10 @@ namespace App\Models;
 use App\Enums\ProjectStatus;
 use App\Enums\Urgency;
 use Carbon\CarbonImmutable;
+use Database\Factories\ProjectFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -16,7 +18,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class Project extends Model
 {
-    use HasUuids;
+    /** @use HasFactory<ProjectFactory> */
+    use HasFactory, HasUuids;
 
     protected $table = 'projects';
 

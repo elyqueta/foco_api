@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\UpdateSettingsRequest;
-use App\Http\Resources\SettingsResource;
+use App\Http\Requests\V1\Settings\UpdateSettingsRequest;
+use App\Http\Resources\V1\SettingsResource;
 use App\Models\NotificationPreference;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;

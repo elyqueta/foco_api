@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Actions\Projects;
 
 use App\Actions\ActivityLog;
+use App\Actions\Categories\ResolveCategory;
 use App\Enums\ActivityType;
 use App\Enums\ProjectStatus;
 use App\Enums\Urgency;
@@ -17,7 +18,7 @@ class CreateProject
 {
     public function handle(User $user, array $data): Project
     {
-        $data = $this->normalize($data);
+        $data = $this->normalize($data, $user);
 
         return DB::transaction(function () use ($user, $data): Project {
             $project = Project::create([
@@ -47,7 +48,7 @@ class CreateProject
     /**
      * @return array<string, mixed>
      */
-    private function normalize(array $data): array
+    private function normalize(array $data, User $user): array
     {
         $title = trim((string) ($data['name'] ?? ''));
         if (strlen($title) < 2) {
@@ -58,10 +59,7 @@ class CreateProject
             );
         }
 
-        $category = trim((string) ($data['category'] ?? 'professional'));
-        if ($category === '') {
-            $category = 'professional';
-        }
+        $category = app(ResolveCategory::class)->canonicalName($user, (string) ($data['category'] ?? ''));
 
         $urgency = $data['urgency'] ?? 'medium';
         if (! $urgency instanceof Urgency) {

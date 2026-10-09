@@ -37,7 +37,11 @@
    - [x] 4.7 `PATCH /api/auth/password` → `204`; revoga os outros tokens
    - [x] 4.8 `auth:sanctum` em todas as rotas excepto `login`/`health`; `401 { message: "Não autenticado." }` via render de `AuthenticationException`
    - [x] 4.9 `sanctum:prune-expired --hours=24` agendado diariamente em `routes/console.php`
-- [ ] **Fase 5** — Categorias (`docs/05-categorias.md`)
+- [x] **Fase 5** — Categorias (`docs/05-categorias.md`)
+   - [x] 5.1 `CategoryController`, `StoreCategoryRequest`, `CategoryResource`, `CategoryPolicy` (só o dono)
+   - [x] 5.2 Action `App\Actions\Categories\RemoveCategory` (transação + atividade + reatribuição)
+   - [x] 5.3 Regra reutilizável `ValidCategory` (usada nas Fases 6, 7 e 11): o valor tem de existir em `categories` do utilizador (comparação por `name_key`; guardar o **nome canónico** da tabela, não o texto recebido)
+   - [x] 5.4 Contagens via `withCount` (sem N+1)
 - [ ] **Fase 6** — Projetos (`docs/06-projetos.md`)
 - [ ] **Fase 7** — Tarefas (`docs/07-tarefas.md`)
 - [ ] **Fase 8** — Timer (`docs/08-timer.md`)
@@ -71,6 +75,20 @@
 - CONFIRMAR: [Fase 4] `expires_at` é serializado como `YYYY-MM-DDTHH:MM:SSZ` (UTC) para coincidir com a convenção de datas do contrato; continua ISO 8601 parseável pelo front.
 - CONFIRMAR: [Fase 4] `notifications.types` no `PATCH /api/settings` é fundido (merge recursivo) com os valores guardados: um tipo enviado parcialmente (ex. só `email`) preserva o outro canal (`inApp`).
 - CONFIRMAR: [Fase 4] Sem horário de verificação de e-mail no login (o `User` não implementa `MustVerifyEmail`); o front não depende disso.
+
+### Reestruturação da v1 (pedida antes da Fase 5)
+- CONFIRMAR: A versão passou a viver na **estrutura do código**, não no URL: controllers em `App\Http\Controllers\Api\V1\`, requests em `App\Http\Requests\V1\`, resources em `App\Http\Resources\V1\` e um ficheiro de rotas por versão (`routes/api/v1.php`, carregado por `routes/api.php`). Uma v2 será `routes/api/v2.php` + namespaces `App\Http\*\V2`, sem tocar na v1. Os URLs mantêm-se sem prefixo de versão, como exige `contrato-api.md` ("sem prefixo de versão na v1").
+- CONFIRMAR: Os endpoints de sistema herdados da Fase 1 saíram de `/api/v1/*` para `/api/*` (`/api/health`, `/api/docs`, `/api/docs.json`), alinhando o código com o contrato e com a checklist da Fase 1 (que já descrevia `/api/health`). As rotas antigas não têm alias: a API ainda não está em produção e só os testes as referenciavam. A view `/docs` (Redoc) passou a apontar para `/api/docs.json`.
+- CONFIRMAR: `ApiDocumentationController` continua em `App\Http\Controllers\Api` (infraestrutura de sistema, não versionada) e serve a OpenAPI de todos os endpoints actuais, incluindo as rotas de categorias.
+
+### Auditoria das Fases 1–4 (feita antes da Fase 5) — bugs corrigidos
+- CONFIRMAR: **`Category::tasks()`/`projects()` sem scoping por utilizador:** as relações (`hasMany` por `category`) contavam tarefas/projetos de **todos** os utilizadores — como todas as contas têm uma categoria `professional`, as contagens transbordavam entre utilizadores. Corrigido com `whereColumn('tasks.user_id', 'categories.user_id')` (funciona em acesso directo e em `withCount`, onde a relação é construída a partir de um modelo protótipo).
+- CONFIRMAR: **Categoria identificada pelo nome canónico:** `tasks.category`/`projects.category` passam a guardar o **nome** da tabela `categories` (doc 05 §5.3, "guardar o nome canónico"); as relações comparam por `name`. Os nomes das 3 categorias padrão foram alinhados com as chaves (`professional`, `personal`, `household`) pela migration `2026_10_09_120000_align_default_category_names` (e no `ProvisionUserDefaults`), para coincidir com os valores que o front guarda em `task.category` (doc 00 §3) e com os exemplos do contrato. Tarefas/projetos existentes já guardavam essas strings, pelo que a conversão não exigiu mexer em dados.
+- CONFIRMAR: **`CreateTask` validava o `projectId` sem scoping:** `Project::whereId($projectId)->exists()` permitia associar tarefas a projetos de outro utilizador (regra 6). Corrigido para `$user->projects()->whereKey($projectId)`. `CreateTask`/`CreateProject` passaram também a resolver a categoria para o nome canónico (`App\Actions\Categories\ResolveCategory`).
+- CONFIRMAR: **`DomainRuleException` era fatal em tempo de execução:** redeclarava `Exception::$code` como `readonly string` ("Cannot redeclare non-readonly property"). Nenhum teste das fases anteriores instanciava a exceção, por isso o bug estava dormente. O código de domínio passou para `$errorCode` (renderizado pelo `bootstrap/app.php`).
+- CONFIRMAR: **404 em inglês:** `ModelNotFoundException`/`NotFoundHttpException` devolviam `{"message":"Not Found"}`; o contrato exige `{ "message": "Não encontrado." }`. Adicionado render próprio em `bootstrap/app.php`.
+- CONFIRMAR: **Models sem `HasFactory`:** `Task`, `Project`, `TaskTimeEntry` e `Category` tinham factory mas não o trait (`Call to undefined method ...::factory()`); `TaskFactory`/`ProjectFactory` usavam `catchWord` (removido no Faker 1.24) e `faker->optional()->sentence()` em colunas `NOT NULL` (`description`). Tudo corrigido; as factories passaram a ser cobertas pelos testes da Fase 5.
+- CONFIRMAR: `Category::nameKey()` (helper estático puro no model) é a fonte única da normalização de nomes (minúsculas + espaços internos colapsados); é usada pelo request, controller, action e regra.
 
 ## Notas de execução
 - Docker Engine activo; imagem construída e API/PostgreSQL local iniciados em 2026-10-07. `/api/health` devolve `200` com `db: true`, `/api/docs` e `/api/docs.json` devolvem `200`, `/docs` devolve a UI, migrations passam e ambos os containers ficam saudáveis. PostgreSQL publicado em `127.0.0.1:5437` porque a porta `5432` já estava ocupada.
@@ -113,6 +131,22 @@
 - **`notifications.types` aceitava canais desconhecidos** (passavam a validação, eram guardados e devolvidos): normalizados para `email`/`inApp` em `UpdateSettingsRequest::passedValidation()`.
 - **Bug de arranque encontrado na verificação (pré-existente, corrigido):** `DatabaseSeeder` e `ProductionSeeder` usavam `callWith($classe, [valores])` com lista posicional — o contentor resolve os parâmetros do `run()` por nome, pelo que os valores eram **silenciosamente descartados**. O fallback do utilizador demo (`admin@todo.ao`) nunca corria e `migrate:fresh --seed` em local/testing criava **zero utilizadores**; além disso, com `SEED_DEMO_DATA=true`, os dados demo iam para `admin@todo.ao` em vez do utilizador semeado. Corrigido com parâmetros nomeados e coberto por 2 testes de regressão.
 - Suíte após revisão: **67 testes / 287 assertions** verdes, Pint limpo; aceitação repetida contra PostgreSQL local (login, me, settings, password, logout, seed e `foco:create-user`).
+
+### Reestruturação da v1 + Fase 5 (auditoria e aceitação)
+- **Estrutura final da v1:** `app/Http/Controllers/Api/V1/{Auth/AuthController, SettingsController, Categories/CategoryController}`, `app/Http/Requests/V1/{Auth,Settings,Categories}/`, `app/Http/Resources/V1/`, `routes/api/v1.php` (carregado por `routes/api.php`, que mantém só os endpoints de sistema). Novas versões = nova pasta, sem tocar na existente.
+- **Aceitação contra o PostgreSQL local do compose (localhost:8000, após rebuild):** `GET /api/health` → 200 (`db: true`), `/api/docs` (UI Redoc) e `/api/docs.json` → 200 (servers só `/api`; paths incluem `/categories` e `/categories/{name}`), `/api/v1/health` → 404 (removido). Login com o admin semeado funciona; `GET /api/categories` devolve as 3 padrão (`household, personal, professional`) com contagens 0; `POST {name:"  Estudos  "}` → 201 com nome com espaços nas pontas removidos; duplicado (`ESTUDOS`) → 422 `errors.name`; nome com 1 caractere → 422; `DELETE /api/categories/professional` → 422 `CATEGORY_PROTECTED`; `DELETE` inexistente → 404 `{"message":"Não encontrado."}`; com tarefa e projeto em `Estudos`, `DELETE` → 204, ambos reatribuídos a `professional` e actividade `edited` ("Categoria alterada para professional") em cada um. `route:list --path=categories` mostra as 3 rotas protegidas por `auth:sanctum`.
+- **Suíte:** 84 testes / 357 assertions verdes (eram 67/287 no início da Fase 5 — +16 testes em `CategoriesTest`), Pint limpo (98 ficheiros).
+- A `CategoryFactory` deixou de usar os nomes de apresentação antigos ('Pessoal', 'Casa') e passa a derivar `name_key` com `Category::nameKey()`.
+
+### Revisão de código das alterações (achados corrigidos)
+- **Índices `(user_id, category)` em `tasks`/`projects`** (`2026_10_09_130000_add_user_category_indexes`): as contagens `withCount` e a reatribuição faziam full scan por utilizador; medido ~14x mais rápido em PostgreSQL com o índice.
+- **`RemoveCategory` em massa:** reatribuição passou a `UPDATE` em bloco + `ActivityEntry::insert()` multi-row (3 statements por tabela em vez de 2N), sempre dentro da transação.
+- **Resolução de categoria centralizada:** `ResolveCategory` passou a ser a fonte única (`handle`, `canonicalName`, `fallback`); removidos o método duplicado `resolveCategoryName` de `CreateTask`/`CreateProject` e os lookups inline de `StoreCategoryRequest`/`CategoryController`. A chave de fallback vive em `Category::DEFAULT_KEY` (usada pelo fallback da BD).
+- **`down()` da migration de alinhamento** passou a no-op documentado: reverter nomes deixaria `tasks/projects.category` órfãos; rollback = redeploy da imagem anterior.
+- **Rotas duplicadas removidas:** `GET /api/` e `GET /api/docs` saíram de `routes/api.php` (ficam só `/`, `/docs` em `web.php`, cobertos por testes); método `ui()` do `ApiDocumentationController` removido.
+- **`CategoryPolicy::view()` removido** (nunca invocado; a leitura é scoped por utilizador).
+- **`ValidCategory` coberto por teste** (`valid_category_rule_accepts_own_category_and_rejects_unknown`), deixando de ser código sem consumidor.
+- Verificado e **descartado** (falso positivo da revisão): o `DB::table()` na migration corre na conexão migrada — `Migrator::runMethod()` define a conexão default durante a execução (incluindo `--database=pgsql_direct` do entrypoint).
 
 ## Registo de deploy
 <!-- Data, URL do Render, resultado da verificação pós-deploy (Fase 12). -->
