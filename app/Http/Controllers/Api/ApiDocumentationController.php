@@ -214,6 +214,37 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
+                '/v1/auth/profile' => [
+                    'patch' => [
+                        'summary' => 'Atualizar nome e/ou email',
+                        'description' => 'Altera o nome e/ou o email do utilizador autenticado. Envie pelo menos um dos dois. Mudar o email exige `currentPassword` e cada mudança fica registada em `email_change_logs` (email antigo, novo, utilizador, data e IP).',
+                        'operationId' => 'updateProfile',
+                        'tags' => ['Auth'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60],
+                                            'email' => ['type' => 'string', 'format' => 'email'],
+                                            'currentPassword' => ['type' => 'string', 'description' => 'Obrigatório ao mudar o email.'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '204' => ['description' => 'Perfil atualizado.'],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => [
+                                'description' => 'Dados inválidos, email já registado ou palavra-passe atual incorreta.',
+                            ],
+                        ],
+                    ],
+                ],
                 '/v1/settings' => [
                     'get' => [
                         'summary' => 'Definições do utilizador',

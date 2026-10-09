@@ -38,6 +38,7 @@
    - [x] 4.8 `auth:sanctum` em todas as rotas excepto `login`/`health`; `401 { message: "Não autenticado." }` via render de `AuthenticationException`
    - [x] 4.9 `sanctum:prune-expired --hours=24` agendado diariamente em `routes/console.php`
    - [x] 4.10 `POST /api/v1/auth/register` (auto-registo de utilizador comum): devolve o mesmo payload do login (token + user + expires_at, ou seja, fica autenticado); cria as 3 categorias padrão **elimináveis** (`is_default=false`) e não cria projetos nem tarefas; throttle `5/min` por IP
+   - [x] 4.11 `PATCH /api/v1/auth/profile` (nome e/ou email do utilizador): mudar email exige a palavra-passe actual e escreve um registo em `email_change_logs` (quem mudou, email antigo → novo, data e IP); email repetido de outro utilizador é rejeitado; nome e email podem ser mudados no mesmo pedido
 - [x] **Fase 5** — Categorias (`docs/05-categorias.md`)
    - [x] 5.1 `CategoryController`, `StoreCategoryRequest`, `CategoryResource`, `CategoryPolicy` (só o dono)
    - [x] 5.2 Action `App\Actions\Categories\RemoveCategory` (transação + atividade + reatribuição)
@@ -88,6 +89,12 @@
 - CONFIRMAR: O auto-registo cria as 3 categorias padrão com `is_default=false` (**elimináveis**, ao contrário das protegidas dos fluxos de admin/seeders) e não cria projetos nem tarefas. O `UserObserver` dispara no `User::create()` e cria as protegidas primeiro, por isso `ProvisionUserDefaults::handle` passou a `updateOrCreate`, reconciliando a flag quando chamado com `protected: false`. Validações e mensagens em PT iguais às do login/password (`Mínimo de 8 caracteres.`, `As palavras-passe não coincidem.`, `Este email já está registado.`).
 - CONFIRMAR: Como as categorias dos auto-registados são elimináveis, o fallback de reatribuição (`ResolveCategory::fallback`) deixou de poder falhar: tenta a padrão `professional`, depois a categoria restante mais antiga e, em último caso, (re)cria `professional` sem protecção. No `RemoveCategory` a categoria é apagada **antes** da reatribuição (`tasks/projects.category` é string sem FK), para que a recriação da padrão não colida com a unique `(user_id, name_key)`.
 - CONFIRMAR: Quando o utilizador apaga a categoria onde tem tarefas/projetos e não resta nenhuma outra, os itens são reatribuídos à `professional` recém-criada — a plataforma nunca deixa itens sem categoria válida.
+
+### Perfil: mudar nome/email com histórico (`PATCH /api/v1/auth/profile`)
+- CONFIRMAR: O endpoint é `PATCH /api/v1/auth/profile` (conta/perfil, separado das definições `settings`) e devolve `204`. Aceita `name` e/ou `email` no mesmo pedido (pelo menos um); validações e mensagens PT iguais às do registo (`Mínimo de 2 caracteres.`, `Este email já está registado.`).
+- CONFIRMAR: Mudar o **email** exige `currentPassword` (`Rule::requiredIf` — obrigatório só quando o email está presente) e verificada com `Hash::check`; sem password não há mudança de email. Mudar o **nome** não exige password.
+- CONFIRMAR: Cada mudança de email escreve uma linha em `email_change_logs` (nova tabela: `user_id`, `old_email`, `new_email`, `ip_address`, timestamps, índice `(user_id, created_at)`) **dentro da mesma transação** da atualização do utilizador — se o update falhar, não fica registo. Mudar para o mesmo email não escreve registo. Model `App\Models\EmailChangeLog` + relação `User::emailChangeLogs()`.
+- CONFIRMAR: Não revoga os outros tokens ao mudar email (diferente da password): quem muda o email confirma a palavra-passe actual, pelo que não há credencial comprometida; registado para revisão.
 
 ### Auditoria das Fases 1–4 (feita antes da Fase 5) — bugs corrigidos
 - CONFIRMAR: **`Category::tasks()`/`projects()` sem scoping por utilizador:** as relações (`hasMany` por `category`) contavam tarefas/projetos de **todos** os utilizadores — como todas as contas têm uma categoria `professional`, as contagens transbordavam entre utilizadores. Corrigido com `whereColumn('tasks.user_id', 'categories.user_id')` (funciona em acesso directo e em `withCount`, onde a relação é construída a partir de um modelo protótipo).

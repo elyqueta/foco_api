@@ -9,6 +9,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Auth\LoginRequest;
 use App\Http\Requests\V1\Auth\RegisterRequest;
 use App\Http\Requests\V1\Auth\UpdatePasswordRequest;
+use App\Http\Requests\V1\Auth\UpdateProfileRequest;
+use App\Models\EmailChangeLog;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -132,6 +134,53 @@ class AuthController extends Controller
                 $user->tokens()->where('id', '!=', $currentTokenId)->delete();
             });
         }
+
+        return response()->json(null, 204);
+    }
+
+    /**
+     * Actualiza o nome e/ou o email do utilizador. Mudar o email exige a
+     * palavra-passe actual e deixa registo na tabela `email_change_logs`
+     * (quem mudou, de que email para qual, quando e de que IP).
+     */
+    public function updateProfile(UpdateProfileRequest $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $user instanceof User) {
+            return response()->json(null, 401);
+        }
+
+        $data = $request->validated();
+
+        $name = array_key_exists('name', $data) ? (string) $data['name'] : null;
+        $email = array_key_exists('email', $data) ? (string) $data['email'] : null;
+        $emailChanged = $email !== null && $email !== $user->email;
+
+        DB::transaction(function () use ($user, $name, $email, $emailChanged, $request): void {
+            if ($emailChanged) {
+                EmailChangeLog::create([
+                    'user_id' => $user->id,
+                    'old_email' => $user->email,
+                    'new_email' => $email,
+                    'ip_address' => $request->ip(),
+                ]);
+            }
+
+            $attributes = [];
+
+            if ($name !== null) {
+                $attributes['name'] = $name;
+            }
+
+            if ($emailChanged) {
+                $attributes['email'] = $email;
+            }
+
+            if ($attributes !== []) {
+                $user->update($attributes);
+            }
+        });
 
         return response()->json(null, 204);
     }

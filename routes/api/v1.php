@@ -27,6 +27,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/auth/logout-all', [AuthController::class, 'logoutAll']);
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::patch('/auth/password', [AuthController::class, 'updatePassword']);
+        Route::patch('/auth/profile', [AuthController::class, 'updateProfile']);
 
         Route::get('/settings', [SettingsController::class, 'show']);
         Route::patch('/settings', [SettingsController::class, 'update']);

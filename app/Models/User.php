@@ -66,6 +66,11 @@ class User extends Authenticatable
         return $this->hasOne(NotificationPreference::class);
     }
 
+    public function emailChangeLogs()
+    {
+        return $this->hasMany(EmailChangeLog::class);
+    }
+
     public function today(): CarbonImmutable
     {
         return app(UserClock::class)->today($this);
