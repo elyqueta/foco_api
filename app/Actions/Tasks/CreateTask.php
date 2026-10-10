@@ -47,6 +47,8 @@ class CreateTask
                 message: 'Tarefa criada',
             );
 
+            $task->setRelation('user', $user);
+
             return $task->load('activity');
         });
     }
@@ -57,7 +59,7 @@ class CreateTask
     private function normalize(User $user, array $data): array
     {
         $title = trim((string) ($data['title'] ?? ''));
-        if (strlen($title) < 2) {
+        if ($title === '' || mb_strlen($title) < 2) {
             throw new DomainRuleException(
                 'INVALID_TITLE',
                 'O título da tarefa deve ter pelo menos 2 caracteres.',
@@ -67,25 +69,15 @@ class CreateTask
 
         $todayLocal = app(UserClock::class)->today($user)->format('Y-m-d');
 
-        $dueDateRaw = $data['dueDate'] ?? null;
-        $dueDate = null;
-        $dueTime = null;
+        ['date' => $dueDate, 'time' => $dueTime] = DueDate::parse($data['dueDate'] ?? null);
 
-        if (is_string($dueDateRaw) && $dueDateRaw !== '') {
-            $dueDateRaw = trim($dueDateRaw);
-            if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $dueDateRaw, $m)) {
-                $dueDate = $dueDateRaw;
-            } elseif (preg_match('/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/', $dueDateRaw, $m)) {
-                $dueDate = $m[1].'-'.$m[2].'-'.$m[3];
-                $dueTime = $m[4].':'.$m[5].':00';
-            }
-        }
-
+        // Criação com prazo no passado é bloqueada (compara só a data, ignora
+        // a hora — doc 07 §6.1). No PATCH é permitido.
         if ($dueDate !== null && $dueDate < $todayLocal) {
-            throw new DomainRuleException(
+            throw DomainRuleException::withErrors(
                 'PAST_DUE_DATE',
-                'A data de prazo não pode estar no passado.',
-                422,
+                'Não é possível criar tarefas com prazo no passado.',
+                ['dueDate' => ['Não é possível criar tarefas com prazo no passado.']],
             );
         }
 
@@ -104,25 +96,22 @@ class CreateTask
         $projectId = $data['projectId'] ?? $data['project_id'] ?? null;
         if (is_string($projectId) && $projectId !== '') {
             if (! $user->projects()->whereKey($projectId)->exists()) {
-                throw new DomainRuleException(
+                throw DomainRuleException::withErrors(
                     'PROJECT_NOT_FOUND',
-                    'Projeto não encontrado.',
-                    404,
+                    'O projeto indicado não existe.',
+                    ['projectId' => ['O projeto indicado não existe.']],
                 );
             }
         } else {
             $projectId = null;
         }
 
-        $tags = $data['tags'] ?? [];
-        if (! is_array($tags)) {
-            $tags = [];
-        }
+        $tags = $this->normalizeTags($data['tags'] ?? []);
 
         $estimateMinutes = $data['estimateMinutes'] ?? $data['estimate_minutes'] ?? null;
         if ($estimateMinutes !== null) {
             $estimateMinutes = (int) $estimateMinutes;
-            if ($estimateMinutes <= 0) {
+            if ($estimateMinutes < 0) {
                 $estimateMinutes = null;
             }
         }
@@ -141,5 +130,28 @@ class CreateTask
             'tags' => $tags,
             'project_id' => $projectId,
         ];
+    }
+
+    /**
+     * Tags: lista de strings não vazias, no máximo 20 (doc 07).
+     *
+     * @return list<string>
+     */
+    private function normalizeTags(mixed $tags): array
+    {
+        if (! is_array($tags)) {
+            return [];
+        }
+
+        $clean = [];
+
+        foreach ($tags as $tag) {
+            $tag = trim((string) $tag);
+            if ($tag !== '') {
+                $clean[] = $tag;
+            }
+        }
+
+        return array_slice(array_values($clean), 0, 20);
     }
 }

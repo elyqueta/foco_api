@@ -50,9 +50,16 @@ return Application::configure(basePath: dirname(__DIR__))
             return response()->json(['message' => $message, 'code' => $code], $status, $headers);
         };
 
-        // Regra de negócio (doc: { message, code }).
-        $exceptions->render(function (DomainRuleException $e, Request $request) use ($apiError) {
-            return $apiError($e->getMessage(), $e->errorCode, $e->status, $e);
+        // Regra de negócio (doc: { message, code }). Algumas regras estão
+        // ligadas a um campo (ex. PAST_DUE_DATE) e acrescentam `errors`.
+        $exceptions->render(function (DomainRuleException $e, Request $request) {
+            $payload = ['message' => $e->getMessage(), 'code' => $e->errorCode];
+
+            if ($e->errors !== []) {
+                $payload['errors'] = $e->errors;
+            }
+
+            return response()->json($payload, $e->status);
         });
 
         // Recurso inexistente (contrato: "Não encontrado.") vs rota

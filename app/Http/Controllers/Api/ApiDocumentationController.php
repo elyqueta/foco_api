@@ -689,6 +689,322 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
+                '/v1/tasks' => [
+                    'get' => [
+                        'summary' => 'Listar tarefas',
+                        'description' => 'Tarefas do utilizador autenticado, **sem** `activity`. Antes de listar corre a expiração preguiçosa (tarefas `todo`/`in_progress` com `due_date` anterior a hoje passam a `expired`). Filtros opcionais: `category`, `urgency`, `status` (um ou vários separados por vírgula), `projectId` (UUID ou `none` para tarefas soltas), `q` (título, descrição, nome do projeto e tags), `dueFrom`/`dueTo` (`YYYY-MM-DD`, calendário), `includeDone` e `includeExpired` (ambos `false` por omissão) e `sort` (`urgency|dueDate|createdAt`; por omissão urgência e depois prazo ascendente, nulos por último).',
+                        'operationId' => 'listTasks',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            ['name' => 'category', 'in' => 'query', 'description' => 'Filtra por categoria (insensível a maiúsculas/espaços). Categoria inexistente devolve lista vazia.', 'schema' => ['type' => 'string', 'example' => 'professional']],
+                            ['name' => 'urgency', 'in' => 'query', 'description' => 'Filtra por urgência.', 'schema' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']]],
+                            ['name' => 'status', 'in' => 'query', 'description' => 'Um ou vários estados separados por vírgula (ex. `todo,in_progress`).', 'schema' => ['type' => 'string', 'example' => 'todo,in_progress']],
+                            ['name' => 'projectId', 'in' => 'query', 'description' => 'UUID de um projeto do utilizador, ou `none` para tarefas soltas.', 'schema' => ['type' => 'string']],
+                            ['name' => 'q', 'in' => 'query', 'description' => 'Pesquisa em título, descrição, nome do projeto e tags (case-insensitive).', 'schema' => ['type' => 'string', 'example' => 'angular']],
+                            ['name' => 'dueFrom', 'in' => 'query', 'description' => 'Data mínima do prazo (YYYY-MM-DD).', 'schema' => ['type' => 'string', 'example' => '2026-10-01']],
+                            ['name' => 'dueTo', 'in' => 'query', 'description' => 'Data máxima do prazo (YYYY-MM-DD).', 'schema' => ['type' => 'string', 'example' => '2026-10-31']],
+                            ['name' => 'includeDone', 'in' => 'query', 'description' => 'Inclui tarefas concluídas (por omissão `false`).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'includeExpired', 'in' => 'query', 'description' => 'Inclui tarefas expiradas (por omissão `false`).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'sort', 'in' => 'query', 'description' => 'Ordenação.', 'schema' => ['type' => 'string', 'enum' => ['urgency', 'dueDate', 'createdAt']]],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de tarefas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/Task'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Filtros inválidos (ex. `status` ou `urgency` desconhecidos).'],
+                        ],
+                    ],
+                    'post' => [
+                        'summary' => 'Criar tarefa',
+                        'description' => 'Cria uma tarefa. `title` é obrigatório (2–255 caracteres). Defaults: `description=""`, `category=professional`, `urgency=medium`, `status=todo` (só `todo|in_progress|postponed` na criação), `canPostpone=true`, `nextStep=""`, `estimateMinutes=null`, `tags=[]`, `projectId=null`. `dueDate` no passado é rejeitado (`422 PAST_DUE_DATE`). Devolve o detalhe, com a atividade `created`.',
+                        'operationId' => 'createTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/TaskInput'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Tarefa criada (detalhe, com `activity`).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Task'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => [
+                                'description' => 'Dados inválidos, `category`/`projectId` inexistentes ou prazo no passado (code PAST_DUE_DATE).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Não é possível criar tarefas com prazo no passado.'],
+                                                'code' => ['type' => 'string', 'example' => 'PAST_DUE_DATE'],
+                                                'errors' => ['type' => 'object', 'example' => ['dueDate' => ['Não é possível criar tarefas com prazo no passado.']]],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}' => [
+                    'parameters' => [
+                        [
+                            'name' => 'id',
+                            'in' => 'path',
+                            'required' => true,
+                            'description' => 'UUID da tarefa.',
+                            'schema' => ['type' => 'string', 'format' => 'uuid'],
+                        ],
+                    ],
+                    'get' => [
+                        'summary' => 'Detalhe da tarefa',
+                        'description' => 'Tarefa com `activity` (entradas mais recentes primeiro). Tarefa inexistente ou de outro utilizador devolve `404 Não encontrado.`.',
+                        'operationId' => 'getTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Task'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                    'patch' => [
+                        'summary' => 'Atualizar tarefa',
+                        'description' => 'Atualização **parcial**. `status` segue a máquina de estados (doc 07 §5.2). Transição inválida → `422 INVALID_TRANSITION`; pedir `expired` manualmente é rejeitado (G-07); `→ postponed` sem nova data → `422 POSTPONE_REQUIRES_DATE`; reactivar uma `expired` exige novo prazo ≥ hoje. Se nenhum valor mudar → `422 { code: "NO_CHANGES" }`. Actividade: `status_changed` (estado), `next_step_changed` (próximo passo) e uma entrada `edited` ("Tarefa editada") para os outros campos; na reactivação de uma `expired`, `edited` "Prazo atualizado; tarefa reativada".',
+                        'operationId' => 'updateTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => false,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/TaskInput'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa atualizada (detalhe, com `activity`).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Task'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Dados inválidos, transição de estado inválida (INVALID_TRANSITION/POSTPONE_REQUIRES_DATE/PAST_DUE_DATE) ou nenhuma alteração (NO_CHANGES).'],
+                        ],
+                    ],
+                    'delete' => [
+                        'summary' => 'Remover tarefa',
+                        'description' => 'Apaga a tarefa e, em cascata, as suas entradas de tempo e o histórico. Responde `200` com a mensagem de sucesso (um `204` não pode ter corpo).',
+                        'operationId' => 'deleteTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa removida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Tarefa removida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/complete' => [
+                    'post' => [
+                        'summary' => 'Concluir tarefa',
+                        'description' => 'Conclui a tarefa (`→ done`, de `todo|in_progress|postponed|expired`). Marca `completed_at`, fecha um timer aberto (motivo `complete`) e devolve `{ task, suggestCompleteProject? }`. `suggestCompleteProject` aparece quando esta é a última tarefa por concluir do projeto.',
+                        'operationId' => 'completeTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa concluída.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'suggestCompleteProject' => [
+                                                    'type' => 'object',
+                                                    'nullable' => true,
+                                                    'properties' => [
+                                                        'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                        'name' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Transição inválida (ex. tarefa já concluída) — code INVALID_TRANSITION.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/reopen' => [
+                    'post' => [
+                        'summary' => 'Reabrir tarefa',
+                        'description' => 'Reabre a tarefa (`done`/`expired` → `todo`): limpa `completed_at` e devolve `{ task }`.',
+                        'operationId' => 'reopenTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa reaberta.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Só é possível reabrir tarefas concluídas ou expiradas — code INVALID_TRANSITION.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/postpone' => [
+                    'post' => [
+                        'summary' => 'Adiar tarefa',
+                        'description' => 'Adia a tarefa (`todo`/`in_progress` → `postponed`). Requer `{ dueDate }` **com data e hora** (`YYYY-MM-DDTHH:mm`; aceita espaço e segundos opcionais). Exige `canPostpone`; a nova data tem de ser ≥ hoje (G-08) e, se hoje, a hora tem de estar no futuro. Incrementa `postponedCount` e devolve `{ task }`.',
+                        'operationId' => 'postponeTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['dueDate'],
+                                        'properties' => [
+                                            'dueDate' => ['type' => 'string', 'example' => '2026-10-20T14:30', 'description' => 'Data **e** hora do novo prazo (YYYY-MM-DDTHH:mm). Só a data é rejeitada.'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa adiada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Data em falta/no passado (PAST_DUE_DATE), tarefa que não pode ser adiada (TASK_CANNOT_POSTPONE) ou estado inválido (INVALID_TRANSITION).'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/notes' => [
+                    'post' => [
+                        'summary' => 'Adicionar nota à tarefa',
+                        'description' => 'Cria uma entrada de atividade `note` com o texto enviado (1–2000 caracteres) e devolve a entrada criada.',
+                        'operationId' => 'addTaskNote',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['text'],
+                                        'properties' => [
+                                            'text' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 2000, 'example' => 'Falar com o fornecedor'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Nota criada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Texto vazio ou superior a 2000 caracteres.'],
+                        ],
+                    ],
+                ],
                 '/health' => [
                     'get' => [
                         'summary' => 'Health check',
@@ -803,6 +1119,61 @@ class ApiDocumentationController
                                 'enum' => ['created', 'status_changed', 'note', 'postponed', 'edited', 'next_step_changed', 'expired', 'timer_started', 'timer_paused', 'timer_resumed', 'timer_stopped'],
                             ],
                             'message' => ['type' => 'string'],
+                        ],
+                    ],
+                    'Task' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true],
+                            'title' => ['type' => 'string', 'example' => 'Integrar API real no destino-mussulo'],
+                            'description' => ['type' => 'string', 'example' => ''],
+                            'category' => ['type' => 'string', 'example' => 'professional'],
+                            'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                            'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired']],
+                            'canPostpone' => ['type' => 'boolean'],
+                            'dueDate' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T14:30', 'description' => 'YYYY-MM-DD ou YYYY-MM-DDTHH:mm (hora local do utilizador).'],
+                            'nextStep' => ['type' => 'string', 'example' => 'Trocar mock service por HttpClient'],
+                            'estimateMinutes' => ['type' => 'integer', 'nullable' => true, 'example' => 90],
+                            'tags' => ['type' => 'array', 'items' => ['type' => 'string'], 'example' => ['angular', 'api']],
+                            'isOverdue' => ['type' => 'boolean'],
+                            'postponedCount' => ['type' => 'integer', 'example' => 0],
+                            'timer' => [
+                                'type' => 'object',
+                                'description' => 'Estado do timer. Na Fase 7 é sempre `idle`; a Fase 8 implementa o arranque/pausa.',
+                                'properties' => [
+                                    'state' => ['type' => 'string', 'enum' => ['idle', 'running', 'paused', 'stopped']],
+                                    'runningSince' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                                    'trackedSeconds' => ['type' => 'integer', 'example' => 0],
+                                    'serverNow' => ['type' => 'string', 'example' => '2026-10-05T09:20:12Z'],
+                                    'firstStartedAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                                ],
+                            ],
+                            'createdAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'updatedAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'completedAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                            'activity' => [
+                                'type' => 'array',
+                                'description' => 'Só no detalhe ( GET /tasks/{id}, criação, atualização e respostas de ações).',
+                                'items' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                            ],
+                        ],
+                    ],
+                    'TaskInput' => [
+                        'type' => 'object',
+                        'required' => ['title'],
+                        'properties' => [
+                            'title' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 255, 'example' => 'Integrar API real no destino-mussulo'],
+                            'description' => ['type' => 'string', 'example' => 'Substituir o mock por chamadas HTTP.'],
+                            'category' => ['type' => 'string', 'maxLength' => 60, 'example' => 'professional'],
+                            'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                            'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired'], 'description' => 'Na criação só `todo|in_progress|postponed`; no PATCH segue a máquina de estados (`expired` só pelo sistema).'],
+                            'canPostpone' => ['type' => 'boolean'],
+                            'dueDate' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T14:30'],
+                            'nextStep' => ['type' => 'string', 'maxLength' => 255],
+                            'estimateMinutes' => ['type' => 'integer', 'minimum' => 0, 'nullable' => true, 'example' => 90],
+                            'tags' => ['type' => 'array', 'maxItems' => 20, 'items' => ['type' => 'string', 'maxLength' => 40]],
+                            'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true, 'description' => 'UUID de um projeto do utilizador ou null.'],
                         ],
                     ],
                 ],

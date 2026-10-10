@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Categories\CategoryController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\SettingsController;
+use App\Http\Controllers\Api\V1\Tasks\TaskController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -45,5 +46,16 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('/projects/{id}', [ProjectController::class, 'update']);
         Route::delete('/projects/{id}', [ProjectController::class, 'destroy']);
         Route::post('/projects/{id}/notes', [ProjectController::class, 'storeNote']);
+
+        // Tarefas (Fase 7).
+        Route::get('/tasks', [TaskController::class, 'index']);
+        Route::post('/tasks', [TaskController::class, 'store']);
+        Route::get('/tasks/{id}', [TaskController::class, 'show']);
+        Route::patch('/tasks/{id}', [TaskController::class, 'update']);
+        Route::delete('/tasks/{id}', [TaskController::class, 'destroy']);
+        Route::post('/tasks/{id}/complete', [TaskController::class, 'complete']);
+        Route::post('/tasks/{id}/reopen', [TaskController::class, 'reopen']);
+        Route::post('/tasks/{id}/postpone', [TaskController::class, 'postpone']);
+        Route::post('/tasks/{id}/notes', [TaskController::class, 'storeNote']);
     });
 });
