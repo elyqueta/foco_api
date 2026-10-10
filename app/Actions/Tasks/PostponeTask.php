@@ -8,10 +8,12 @@ use App\Enums\ActivityType;
 use App\Enums\TaskStatus;
 use App\Exceptions\DomainRuleException;
 use App\Models\Task;
+use App\Models\TaskTimeEntry;
 use App\Models\User;
 use App\Services\CloseOpenTimer;
 use App\Services\RecordActivity;
 use App\Services\TaskStateMachine;
+use App\Services\TimerService;
 use App\Services\UserClock;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -50,7 +52,7 @@ class PostponeTask
         $this->assertDueIsFuture($user, $dueDate, $dueTime);
 
         DB::transaction(function () use ($user, $task, $dueDate, $dueTime): void {
-            app(CloseOpenTimer::class)->handle($task, 'postpone');
+            $stoppedEntry = app(CloseOpenTimer::class)->handle($task, 'postpone');
 
             $task->update([
                 'due_date' => $dueDate,
@@ -65,6 +67,15 @@ class PostponeTask
                 ActivityType::Postponed,
                 PostponeMessage::for($dueDate, $dueTime),
             );
+
+            if ($stoppedEntry instanceof TaskTimeEntry) {
+                app(RecordActivity::class)->record(
+                    $user,
+                    $task,
+                    ActivityType::TimerStopped,
+                    app(TimerService::class)->stoppedMessage($stoppedEntry),
+                );
+            }
         });
 
         $task->setRelation('user', $user);

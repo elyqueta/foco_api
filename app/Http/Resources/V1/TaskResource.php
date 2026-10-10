@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Resources\V1;
 
 use App\Actions\Tasks\DueDate;
-use App\Enums\TimerState;
 use App\Http\Resources\V1\Concerns\FormatsContractDates;
 use App\Models\Task;
+use App\Services\TimerService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,9 +16,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * detalhe (GET/tasks/{id}, respostas de ações) — as listas não carregam a
  * relação, por isso o campo é omitido (T-08).
  *
- * O bloco `timer` existe desde já com `state=idle`: o timer propriamente dito
- * é implementado na Fase 8. `serverNow` vem sempre em UTC para o front poder
- * compensar a deriva do relógio.
+ * O bloco `timer` é calculado a partir de `task_time_entries` +
+ * `tasks.tracked_seconds`: `trackedSeconds` já **inclui** o tempo da entrada
+ * a decorrer, para o cliente só somar o que passa desde a resposta.
+ * `serverNow` vem sempre em UTC para o front compensar a deriva do relógio.
  *
  * @property-read Task $resource
  */
@@ -60,20 +61,27 @@ class TaskResource extends JsonResource
     }
 
     /**
-     * Bloco `timer` do contrato. Na Fase 7 o timer ainda não corre: estado
-     * `idle`, `runningSince` nulo e `trackedSeconds` lido da coluna (que a
-     * Fase 8 passa a gerir). `serverNow` é sempre o instante actual em UTC.
+     * Bloco `timer` do contrato (doc 08). A entrada aberta é lida pela
+     * relação `activeTimeEntry`: nas listas ela vem carregada com
+     * `with('activeTimeEntry')` (uma query extra para toda a lista) e no
+     * detalhe é uma query única — nunca N+1.
      *
      * @return array<string, mixed>
      */
     private function timer(): array
     {
+        $timers = app(TimerService::class);
+
+        $task = $this->resource;
+
+        $open = $timers->open($task);
+
         return [
-            'state' => TimerState::Idle->value,
-            'runningSince' => null,
-            'trackedSeconds' => (int) $this->resource->tracked_seconds,
+            'state' => $timers->state($task)->value,
+            'runningSince' => $this->contractDate($open?->started_at),
+            'trackedSeconds' => $timers->trackedSeconds($task),
             'serverNow' => $this->contractDate(now()),
-            'firstStartedAt' => $this->contractDate($this->resource->first_started_at),
+            'firstStartedAt' => $this->contractDate($task->first_started_at),
         ];
     }
 }

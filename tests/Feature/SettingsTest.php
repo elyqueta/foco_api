@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\NotificationPreference;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\ActsAsUser;
@@ -305,5 +306,31 @@ class SettingsTest extends TestCase
         $this->patchJson('/api/v1/settings', ['theme' => 'dark'])
             ->assertStatus(401)
             ->assertJsonPath('message', 'Não autenticado.');
+    }
+
+    #[Test]
+    public function notification_preferences_resolve_the_in_app_channel(): void
+    {
+        $this->actingAsUser();
+
+        /** @var NotificationPreference $preference */
+        $preference = User::query()->firstOrFail()->notificationPreference;
+
+        $this->assertInstanceOf(NotificationPreference::class, $preference);
+
+        // Regressão: a chave do canal no array `types` é `inApp` (contrato),
+        // não `in_app` — sem essa tradução nenhum tipo ficava activo no canal
+        // in-app e as notificações nunca seriam criadas.
+        $this->assertTrue($preference->channelEnabled('timer_running_long', 'in_app'));
+        $this->assertTrue($preference->channelEnabled('task_completed', 'in_app'));
+
+        // `email` está desligado por omissão neste tipo.
+        $this->assertFalse($preference->channelEnabled('timer_running_long', 'email'));
+        $this->assertTrue($preference->channelEnabled('task_due_soon', 'email'));
+
+        // Desligar o canal global desliga tudo.
+        $preference->update(['in_app_enabled' => false]);
+
+        $this->assertFalse($preference->fresh()->channelEnabled('task_completed', 'in_app'));
     }
 }

@@ -9,6 +9,7 @@ use App\Actions\Projects\AddProjectNote;
 use App\Actions\Projects\CreateProject;
 use App\Actions\Projects\DeleteProject;
 use App\Actions\Projects\UpdateProject;
+use App\Enums\ProjectStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Projects\ListProjectsRequest;
 use App\Http\Requests\V1\Projects\StoreProjectNoteRequest;
@@ -19,6 +20,7 @@ use App\Http\Resources\V1\ProjectResource;
 use App\Models\Category;
 use App\Models\Project;
 use App\Models\User;
+use App\Support\PageResponse;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,13 +28,6 @@ use Illuminate\Support\Str;
 
 class ProjectController extends Controller
 {
-    /**
-     * Tecto de segurança da listagem: a API não pagina projetos (o contrato
-     * devolve um array simples), mas também não devolve um número ilimitado
-     * de projetos num único pedido.
-     */
-    private const LIST_LIMIT = 500;
-
     /**
      * Tecto do histórico devolvido no detalhe: as entradas mais recentes
      * primeiro, com um máximo razoável para a resposta não crescer sem fim.
@@ -43,7 +38,10 @@ class ProjectController extends Controller
      * Lista os projetos do utilizador (sem `activity`), com `progress`.
      * Filtros: `category`, `status` e `q` (nome/descrição). A categoria é
      * resolvida para o nome canónico; uma categoria inexistente devolve
-     * lista vazia em vez de erro.
+     * lista vazia em vez de erro. Paginada (`page`/`perPage`) com totais e
+     * contagens por estado com os mesmos filtros **excepto o de estado**.
+     *
+     * Resposta: `{ items, page, perPage, total, totalPages, counts }`.
      */
     public function index(ListProjectsRequest $request): JsonResponse
     {
@@ -54,8 +52,11 @@ class ProjectController extends Controller
 
         $category = $this->resolveCategoryFilter($user, $filters['category'] ?? null);
 
+        $page = max(1, (int) $request->integer('page', 1));
+        $perPage = max(1, (int) $request->integer('perPage', PageResponse::DEFAULT_PER_PAGE));
+
         if ($category === false) {
-            return ProjectResource::collection([])->response();
+            return response()->json(PageResponse::empty($page, $perPage));
         }
 
         $status = isset($filters['status']) && $filters['status'] !== '' ? (string) $filters['status'] : null;
@@ -68,10 +69,40 @@ class ProjectController extends Controller
             ->when($term !== null, fn ($query) => $query->search($term))
             ->orderByDesc('created_at')
             ->orderBy('name')
-            ->limit(self::LIST_LIMIT)
-            ->get();
+            ->paginate($perPage, ['*'], 'page', $page);
 
-        return ProjectResource::collection($projects)->response();
+        // `items` no formato do contrato (ProjectResource), não o modelo cru.
+        $projects->through(fn (Project $project): array => ProjectResource::make($project)->resolve());
+
+        return response()->json(PageResponse::from(
+            $projects,
+            $this->statusCounts($user, $category, $term),
+        ));
+    }
+
+    /**
+     * Contagens por estado com os mesmos filtros **excepto o de estado** —
+     * para o front desenhar os separadores sem pedir uma lista por estado.
+     *
+     * @return array<string, int>
+     */
+    private function statusCounts(User $user, Category|string|false|null $category, ?string $term): array
+    {
+        $rows = $user->projects()
+            ->when($category !== null, fn ($query) => $query->where('category', $category))
+            ->when($term !== null, fn ($query) => $query->search($term))
+            ->getQuery()
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        $counts = [];
+
+        foreach (ProjectStatus::cases() as $status) {
+            $counts[$status->value] = (int) ($rows[$status->value] ?? 0);
+        }
+
+        return $counts;
     }
 
     /**

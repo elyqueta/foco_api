@@ -40,9 +40,9 @@ class ProjectsTest extends TestCase
 
         $response = $this->getJson('/api/v1/projects')->assertOk();
 
-        $response->assertJsonCount(2);
+        $response->assertJsonCount(2, 'items');
 
-        $projects = collect($response->json());
+        $projects = collect($response->json('items'));
 
         // Mais recente primeiro; a lista não carrega `activity` (T-08).
         $this->assertSame([$newest->id, $oldest->id], $projects->pluck('id')->all());
@@ -79,26 +79,26 @@ class ProjectsTest extends TestCase
 
         $this->getJson('/api/v1/projects?category=estudos')
             ->assertOk()
-            ->assertJsonCount(1)
-            ->assertJsonPath('0.id', $estudos->id);
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $estudos->id);
 
         $this->getJson('/api/v1/projects?category=Inexistente')
             ->assertOk()
-            ->assertJsonCount(0);
+            ->assertJsonCount(0, 'items');
 
         $this->getJson('/api/v1/projects?status=paused')
             ->assertOk()
-            ->assertJsonCount(1)
-            ->assertJsonPath('0.id', $pausado->id);
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $pausado->id);
 
         $this->getJson('/api/v1/projects?q=loja')
             ->assertOk()
-            ->assertJsonCount(1)
-            ->assertJsonPath('0.id', $pausado->id);
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $pausado->id);
 
         $this->getJson('/api/v1/projects?q=reservas')
             ->assertOk()
-            ->assertJsonCount(1);
+            ->assertJsonCount(1, 'items');
     }
 
     #[Test]
@@ -590,7 +590,7 @@ class ProjectsTest extends TestCase
 
         $this->getJson('/api/v1/projects')
             ->assertOk()
-            ->assertJsonPath('0.progress', ['total' => 4, 'done' => 1, 'percent' => 25]);
+            ->assertJsonPath('items.0.progress', ['total' => 4, 'done' => 1, 'percent' => 25]);
     }
 
     #[Test]

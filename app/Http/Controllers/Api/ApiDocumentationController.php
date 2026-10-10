@@ -15,7 +15,7 @@ class ApiDocumentationController
             'info' => [
                 'title' => config('app.name', 'Foco API').' — v1',
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `409 TIMER_ALREADY_RUNNING` (o timer desta tarefa já está a correr — devolve a `task`), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, `TIMER_WRONG_STATE`, `TIMER_NOT_ALLOWED`, `TIMER_NOT_RUNNING`, `INVALID_TRANSITION`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). **Timer:** só pode existir um timer a correr por utilizador; iniciar/retomar outra tarefa pausa a actual automaticamente (`auto_pause`, devolvida em `pausedTask`). Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
             ],
             'servers' => [
                 ['url' => '/api', 'description' => 'Base da API: rotas de domínio em /api/v1/*, sistema em /api/*'],
@@ -481,7 +481,7 @@ class ApiDocumentationController
                 '/v1/projects' => [
                     'get' => [
                         'summary' => 'Listar projetos',
-                        'description' => 'Projetos do utilizador autenticado, do mais recente ao mais antigo, **sem** `activity` e com `progress` (`{ total, done, percent }`; tarefas `expired` contam no total). Filtros opcionais: `category` (nome canónico ou variação), `status` e `q` (pesquisa em nome e descrição).',
+                        'description' => 'Projetos do utilizador autenticado, do mais recente ao mais antigo, **sem** `activity` e com `progress` (`{ total, done, percent }`; tarefas `expired` contam no total). Filtros opcionais: `category` (nome canónico ou variação), `status`, `q` (pesquisa em nome e descrição) e a página (`page` ≥ 1, `perPage` 1…100 — 20 por omissão). Resposta: `{ items, page, perPage, total, totalPages, counts }`, onde `counts` traz as contagens por estado com os mesmos filtros **excepto o de estado**.',
                         'operationId' => 'listProjects',
                         'tags' => ['Projetos'],
                         'security' => [['bearerAuth' => []]],
@@ -504,21 +504,51 @@ class ApiDocumentationController
                                 'description' => 'Pesquisa em nome e descrição (case-insensitive).',
                                 'schema' => ['type' => 'string', 'example' => 'loja'],
                             ],
+                            [
+                                'name' => 'page',
+                                'in' => 'query',
+                                'description' => 'Página pedida (≥ 1).',
+                                'schema' => ['type' => 'integer', 'minimum' => 1, 'default' => 1],
+                            ],
+                            [
+                                'name' => 'perPage',
+                                'in' => 'query',
+                                'description' => 'Projetos por página (1…100).',
+                                'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 20],
+                            ],
                         ],
                         'responses' => [
                             '200' => [
-                                'description' => 'Lista de projetos.',
+                                'description' => 'Página de projetos com totais e contagens por estado.',
                                 'content' => [
                                     'application/json' => [
                                         'schema' => [
-                                            'type' => 'array',
-                                            'items' => ['$ref' => '#/components/schemas/Project'],
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'items' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Project'],
+                                                ],
+                                                'page' => ['type' => 'integer', 'example' => 1],
+                                                'perPage' => ['type' => 'integer', 'example' => 20],
+                                                'total' => ['type' => 'integer', 'example' => 8],
+                                                'totalPages' => ['type' => 'integer', 'example' => 1],
+                                                'counts' => [
+                                                    'type' => 'object',
+                                                    'description' => 'Contagens por estado com os mesmos filtros **excepto o de estado**.',
+                                                    'properties' => [
+                                                        'active' => ['type' => 'integer', 'example' => 5],
+                                                        'paused' => ['type' => 'integer', 'example' => 2],
+                                                        'done' => ['type' => 'integer', 'example' => 1],
+                                                    ],
+                                                ],
+                                            ],
                                         ],
                                     ],
                                 ],
                             ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
-                            '422' => ['description' => 'Filtro `status` inválido.'],
+                            '422' => ['description' => 'Filtro `status` inválido ou `page`/`perPage` fora dos limites.'],
                         ],
                     ],
                     'post' => [
@@ -692,7 +722,7 @@ class ApiDocumentationController
                 '/v1/tasks' => [
                     'get' => [
                         'summary' => 'Listar tarefas',
-                        'description' => 'Tarefas do utilizador autenticado, **sem** `activity`. Antes de listar corre a expiração preguiçosa (tarefas `todo`/`in_progress` com `due_date` anterior a hoje passam a `expired`). Filtros opcionais: `category`, `urgency`, `status` (um ou vários separados por vírgula), `projectId` (UUID ou `none` para tarefas soltas), `q` (título, descrição, nome do projeto e tags), `dueFrom`/`dueTo` (`YYYY-MM-DD`, calendário), `includeDone` e `includeExpired` (ambos `false` por omissão) e `sort` (`urgency|dueDate|createdAt`; por omissão urgência e depois prazo ascendente, nulos por último).',
+                        'description' => 'Tarefas do utilizador autenticado, **sem** `activity`, **paginiadas**. Antes de listar corre a expiração preguiçosa (tarefas `todo`/`in_progress` com `due_date` anterior a hoje passam a `expired`). Filtros opcionais: `category`, `urgency`, `status` (um ou vários separados por vírgula), `projectId` (UUID ou `none` para tarefas soltas), `q` (título, descrição, nome do projeto e tags), `dueFrom`/`dueTo` (`YYYY-MM-DD`, calendário), `includeDone` e `includeExpired` (ambos `false` por omissão), `sort` (`urgency|dueDate|createdAt`; por omissão urgência e depois prazo ascendente, nulos por último) e a página (`page` ≥ 1, `perPage` 1…100 — 20 por omissão). Resposta: `{ items, page, perPage, total, totalPages, counts }`, onde `counts` traz as contagens por estado com os mesmos filtros **excepto o de estado** (para o front desenhar os separadores sem pedir uma lista por estado).',
                         'operationId' => 'listTasks',
                         'tags' => ['Tarefas'],
                         'security' => [['bearerAuth' => []]],
@@ -704,24 +734,47 @@ class ApiDocumentationController
                             ['name' => 'q', 'in' => 'query', 'description' => 'Pesquisa em título, descrição, nome do projeto e tags (case-insensitive).', 'schema' => ['type' => 'string', 'example' => 'angular']],
                             ['name' => 'dueFrom', 'in' => 'query', 'description' => 'Data mínima do prazo (YYYY-MM-DD).', 'schema' => ['type' => 'string', 'example' => '2026-10-01']],
                             ['name' => 'dueTo', 'in' => 'query', 'description' => 'Data máxima do prazo (YYYY-MM-DD).', 'schema' => ['type' => 'string', 'example' => '2026-10-31']],
-                            ['name' => 'includeDone', 'in' => 'query', 'description' => 'Inclui tarefas concluídas (por omissão `false`).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
-                            ['name' => 'includeExpired', 'in' => 'query', 'description' => 'Inclui tarefas expiradas (por omissão `false`).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'includeDone', 'in' => 'query', 'description' => 'Aceite por compatibilidade; já não altera o resultado (o histórico completo passou a ser a omissão).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'includeExpired', 'in' => 'query', 'description' => 'Aceite por compatibilidade; já não altera o resultado (o histórico completo passou a ser a omissão).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'openOnly', 'in' => 'query', 'description' => 'Restringe a lista às tarefas abertas (`todo`, `in_progress`, `postponed`).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
                             ['name' => 'sort', 'in' => 'query', 'description' => 'Ordenação.', 'schema' => ['type' => 'string', 'enum' => ['urgency', 'dueDate', 'createdAt']]],
+                            ['name' => 'page', 'in' => 'query', 'description' => 'Página pedida (≥ 1).', 'schema' => ['type' => 'integer', 'minimum' => 1, 'default' => 1]],
+                            ['name' => 'perPage', 'in' => 'query', 'description' => 'Tarefas por página (1…100).', 'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 20]],
                         ],
                         'responses' => [
                             '200' => [
-                                'description' => 'Lista de tarefas.',
+                                'description' => 'Página de tarefas com totais e contagens por estado.',
                                 'content' => [
                                     'application/json' => [
                                         'schema' => [
-                                            'type' => 'array',
-                                            'items' => ['$ref' => '#/components/schemas/Task'],
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'items' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Task'],
+                                                ],
+                                                'page' => ['type' => 'integer', 'example' => 1],
+                                                'perPage' => ['type' => 'integer', 'example' => 20],
+                                                'total' => ['type' => 'integer', 'example' => 57],
+                                                'totalPages' => ['type' => 'integer', 'example' => 3],
+                                                'counts' => [
+                                                    'type' => 'object',
+                                                    'description' => 'Contagens por estado com os mesmos filtros **excepto o de estado**.',
+                                                    'properties' => [
+                                                        'todo' => ['type' => 'integer', 'example' => 12],
+                                                        'in_progress' => ['type' => 'integer', 'example' => 5],
+                                                        'done' => ['type' => 'integer', 'example' => 30],
+                                                        'postponed' => ['type' => 'integer', 'example' => 3],
+                                                        'expired' => ['type' => 'integer', 'example' => 7],
+                                                    ],
+                                                ],
+                                            ],
                                         ],
                                     ],
                                 ],
                             ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
-                            '422' => ['description' => 'Filtros inválidos (ex. `status` ou `urgency` desconhecidos).'],
+                            '422' => ['description' => 'Filtros inválidos (ex. `status` ou `urgency` desconhecidos, `page`/`perPage` fora dos limites).'],
                         ],
                     ],
                     'post' => [
@@ -1005,6 +1058,219 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
+                '/v1/tasks/{id}/timer/start' => [
+                    'post' => [
+                        'summary' => 'Iniciar timer',
+                        'description' => 'Inicia a contagem do tempo da tarefa (exige estado `idle`) e devolve `{ task, pausedTask? }`. `todo`/`postponed` passam a `in_progress`; a hora é sempre a do servidor (`serverNow`, no bloco `timer`). Se **outra** tarefa estiver a correr, é pausada automaticamente (`auto_pause`) e devolvida em `pausedTask`. Se esta tarefa já tiver o timer a correr → `409` com a tarefa (`code` TIMER_ALREADY_RUNNING).',
+                        'operationId' => 'startTaskTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Timer iniciado (ou tarefa já em curso — 409).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'pausedTask' => ['$ref' => '#/components/schemas/Task'],
+                                                'message' => ['type' => 'string', 'example' => 'Esta tarefa já tem o timer a correr.'],
+                                                'code' => ['type' => 'string', 'example' => 'TIMER_ALREADY_RUNNING'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Estado errado para o modo pedido (code TIMER_WRONG_STATE) ou tarefa concluída/expirada (code TIMER_NOT_ALLOWED, com a razão exacta na mensagem).'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/timer/pause' => [
+                    'post' => [
+                        'summary' => 'Pausar timer',
+                        'description' => 'Fecha a entrada aberta (motivo `pause`), acumula os segundos em `tasks.tracked_seconds` e mantém a tarefa `in_progress`. Sem entrada aberta → `422` (code TIMER_NOT_RUNNING). Entradas com menos de 1 segundo são descartadas. Devolve `{ task }`.',
+                        'operationId' => 'pauseTaskTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Timer pausado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'O timer não está a correr — code TIMER_NOT_RUNNING.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/timer/resume' => [
+                    'post' => [
+                        'summary' => 'Retomar timer',
+                        'description' => 'Retoma a contagem da tarefa (exige estado `paused`) e devolve `{ task, pausedTask? }`. É a **única** forma de uma tarefa `postponed` voltar a `in_progress` (G-02). Aplica-se o mesmo comportamento de pausa automática do início.',
+                        'operationId' => 'resumeTaskTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Timer retomado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'pausedTask' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '409' => ['description' => 'A tarefa já tem o timer a correr — code TIMER_ALREADY_RUNNING.'],
+                            '422' => ['description' => 'Estado errado para o modo pedido (code TIMER_WRONG_STATE) ou tarefa concluída/expirada (code TIMER_NOT_ALLOWED, com a razão exacta na mensagem).'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/time-entries' => [
+                    'get' => [
+                        'summary' => 'Entradas de tempo da tarefa',
+                        'description' => 'Histórico de entradas de tempo (`{ id, startedAt, endedAt, endedReason, seconds }`), mais recentes primeiro (máximo 100). `endedReason` é `pause|auto_pause|complete|postpone`.',
+                        'operationId' => 'listTaskTimeEntries',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de entradas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/TimeEntry'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/timer/active' => [
+                    'get' => [
+                        'summary' => 'Tarefa com o timer a correr',
+                        'description' => 'Devolve `{ task }` com o timer a correr do utilizador (para recuperar o estado ao abrir a app). Sem nenhum timer a correr devolve `200` com `{ task: null, message: "Nenhum timer a correr." }`.',
+                        'operationId' => 'getActiveTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa com timer a correr, ou `task: null` com mensagem.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'message' => ['type' => 'string', 'example' => 'Nenhum timer a correr.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/time/summary' => [
+                    'get' => [
+                        'summary' => 'Resumo de tempo',
+                        'description' => 'Totais agregados de tempo. `from`/`to` são dias (`YYYY-MM-DD`) **do fuso do utilizador**, inclusive; por omissão os últimos 7 dias. Entradas que atravessam a meia-noite são divididas pelo dia local. `groupBy`: `day` (cronológico), `task` (mais tempo primeiro, com `title`) ou `category`.',
+                        'operationId' => 'getTimeSummary',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'from',
+                                'in' => 'query',
+                                'description' => 'Dia inicial (fuso do utilizador). Por omissão, há 6 dias.',
+                                'schema' => ['type' => 'string', 'example' => '2026-10-04'],
+                            ],
+                            [
+                                'name' => 'to',
+                                'in' => 'query',
+                                'description' => 'Dia final (fuso do utilizador). Por omissão, hoje.',
+                                'schema' => ['type' => 'string', 'example' => '2026-10-10'],
+                            ],
+                            [
+                                'name' => 'groupBy',
+                                'in' => 'query',
+                                'description' => 'Agrupamento dos totais.',
+                                'schema' => ['type' => 'string', 'enum' => ['day', 'task', 'category'], 'example' => 'day'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Totais agregados.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/TimeSummary'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Datas inválidas, `from > to`, período superior a um ano ou `groupBy` inválido.'],
+                        ],
+                    ],
+                ],
                 '/health' => [
                     'get' => [
                         'summary' => 'Health check',
@@ -1140,7 +1406,7 @@ class ApiDocumentationController
                             'postponedCount' => ['type' => 'integer', 'example' => 0],
                             'timer' => [
                                 'type' => 'object',
-                                'description' => 'Estado do timer. Na Fase 7 é sempre `idle`; a Fase 8 implementa o arranque/pausa.',
+                                'description' => 'Estado do timer, calculado pela API (o cliente nunca envia timestamps). `idle` sem tempo registado; `running` entrada aberta; `paused` tempo registado e tarefa aberta; `stopped` tarefa concluída/expirada com tempo registado. `trackedSeconds` **já inclui** a entrada a decorrer — o cliente soma apenas o tempo passado desde a resposta (deriva compensada com `serverNow`, UTC).',
                                 'properties' => [
                                     'state' => ['type' => 'string', 'enum' => ['idle', 'running', 'paused', 'stopped']],
                                     'runningSince' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
@@ -1174,6 +1440,39 @@ class ApiDocumentationController
                             'estimateMinutes' => ['type' => 'integer', 'minimum' => 0, 'nullable' => true, 'example' => 90],
                             'tags' => ['type' => 'array', 'maxItems' => 20, 'items' => ['type' => 'string', 'maxLength' => 40]],
                             'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true, 'description' => 'UUID de um projeto do utilizador ou null.'],
+                        ],
+                    ],
+                    'TimeEntry' => [
+                        'type' => 'object',
+                        'description' => 'Entrada de tempo de uma tarefa (`task_time_entries`).',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'startedAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'endedAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T10:02:00Z'],
+                            'endedReason' => ['type' => 'string', 'nullable' => true, 'enum' => ['pause', 'auto_pause', 'complete', 'postpone']],
+                            'seconds' => ['type' => 'integer', 'example' => 3000, 'description' => 'max(0, fim - início) em segundos inteiros; entrada aberta conta até agora.'],
+                        ],
+                    ],
+                    'TimeSummary' => [
+                        'type' => 'object',
+                        'description' => 'Resumo de tempo agregado ( GET /time/summary).',
+                        'properties' => [
+                            'groupBy' => ['type' => 'string', 'enum' => ['day', 'task', 'category']],
+                            'from' => ['type' => 'string', 'example' => '2026-10-04'],
+                            'to' => ['type' => 'string', 'example' => '2026-10-10'],
+                            'items' => [
+                                'type' => 'array',
+                                'description' => '`day`: `{ key: "2026-10-05", seconds }` por ordem cronológica. `task`: `{ key: taskId, title, seconds }`. `category`: `{ key: "professional", seconds }`.',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'key' => ['type' => 'string', 'example' => '2026-10-05'],
+                                        'title' => ['type' => 'string', 'example' => 'Integrar API real no destino-mussulo', 'description' => 'Só em `groupBy=task`.'],
+                                        'seconds' => ['type' => 'integer', 'example' => 1840],
+                                    ],
+                                ],
+                            ],
+                            'totalSeconds' => ['type' => 'integer', 'example' => 13200],
                         ],
                     ],
                 ],

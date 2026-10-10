@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\CloseOpenTimer;
 use App\Services\RecordActivity;
 use App\Services\TaskStateMachine;
+use App\Services\TimerService;
 use Illuminate\Support\Facades\DB;
 
 class CompleteTask
@@ -53,7 +54,7 @@ class CompleteTask
                     $user,
                     $task,
                     ActivityType::TimerStopped,
-                    'Timer parado',
+                    app(TimerService::class)->stoppedMessage($stoppedEntry),
                 );
             }
         });

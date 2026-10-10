@@ -43,7 +43,10 @@ class UserClock
         return CarbonImmutable::parse("{$date} {$time}", $tz)->utc();
     }
 
-    private function timezone(User $user): string
+    /**
+     * Fuso do utilizador (default UTC, com validação do identificador).
+     */
+    public function timezone(User $user): string
     {
         $tz = $user->timezone ?? 'UTC';
 

@@ -7,7 +7,10 @@ namespace App\Actions\Tasks;
 use App\Enums\TaskStatus;
 use App\Enums\Urgency;
 use App\Models\User;
+use App\Support\PageResponse;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Arr;
 
 /**
  * Filtros da listagem de tarefas (doc 07). Objeto de query: recebe o builder
@@ -17,21 +20,81 @@ use Illuminate\Database\Eloquent\Builder;
  * Todos os filtros são opcionais: `category`, `urgency`, `status` (um ou
  * vários separados por vírgula), `projectId` (UUID ou `none`), `q` (título,
  * descrição, nome do projeto e tags), `dueFrom`/`dueTo` (calendário),
- * `includeDone` e `includeExpired` (ambos `false` por omissão) e `sort`
- * (`urgency|dueDate|createdAt`).
+ * `openOnly` (restringe às tarefas abertas) e `sort`
+ * (`urgency|dueDate|createdAt`). Sem `status` nem `openOnly` a lista traz o
+ * **histórico completo** (inclui `done` e `expired`). A página é `page`
+ * (≥ 1) e `perPage` (1…`PageResponse::MAX_PER_PAGE`,
+ * `PageResponse::DEFAULT_PER_PAGE` por omissão).
  */
 class TaskQuery
 {
     /**
-     * Tecto de segurança da listagem (a API não pagina na v1, mas também não
-     * devolve um número ilimitado de tarefas num único pedido).
-     */
-    public const LIST_LIMIT = 500;
-
-    /**
      * @param  array<string, mixed>  $filters  filtros já normalizados
      */
     public function apply(Builder $query, array $filters, User $user): Builder
+    {
+        $query = $this->applyFilters($query, $filters, $user);
+
+        return $this->applySort($query, is_string($filters['sort'] ?? null) ? $filters['sort'] : null);
+    }
+
+    /**
+     * Lista paginada: filtros + ordenação + página pedida. O `perPage` é
+     * limitado a `PageResponse::MAX_PER_PAGE` (a validação do request já o
+     * garante; aqui é defesa para chamadas internas).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(Builder $query, array $filters, User $user, int $page, int $perPage): LengthAwarePaginator
+    {
+        $this->apply($query, $filters, $user);
+
+        return $query->paginate(
+            max(1, min($perPage, PageResponse::MAX_PER_PAGE)),
+            ['*'],
+            'page',
+            max(1, $page),
+        );
+    }
+
+    /**
+     * Contagens por estado com os **mesmos filtros excepto o de estado**
+     * (`status`/`openOnly`): o front desenha os separadores sem pedir uma
+     * lista por estado. Sempre com todos os estados presentes (0 quando não
+     * há tarefas).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, int>
+     */
+    public function statusCounts(Builder $query, array $filters, User $user): array
+    {
+        $filters = Arr::except($filters, ['status', 'openOnly']);
+
+        // Sem qualquer restrição de estado: contar por cima da lista padrão
+        // (só abertos) daria sempre 0 em `done`/`expired`.
+        $this->applyFilters($query, $filters, $user, false);
+
+        $rows = $query->getQuery()
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        $counts = [];
+
+        foreach (TaskStatus::cases() as $status) {
+            $counts[$status->value] = (int) ($rows[$status->value] ?? 0);
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Filtros sem ordenação nem página (partilhado pela listagem e pelas
+     * contagens por estado).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyFilters(Builder $query, array $filters, User $user, bool $statusFilter = true): Builder
     {
         if (isset($filters['category']) && is_string($filters['category']) && $filters['category'] !== '') {
             $query->where('category', $filters['category']);
@@ -41,9 +104,11 @@ class TaskQuery
             $query->where('urgency', $filters['urgency']->value);
         }
 
-        $query->when($this->statusFilter($filters), function (Builder $q, array $statuses): void {
-            $q->whereIn('status', $statuses);
-        });
+        if ($statusFilter) {
+            $query->when($this->statusFilter($filters), function (Builder $q, array $statuses): void {
+                $q->whereIn('status', $statuses);
+            });
+        }
 
         $query = $this->applyProjectFilter($query, $filters['projectId'] ?? null, $user);
 
@@ -59,13 +124,18 @@ class TaskQuery
             $q->whereDate('due_date', '<=', $to);
         });
 
-        return $this->applySort($query, is_string($filters['sort'] ?? null) ? $filters['sort'] : null);
+        return $query;
     }
 
     /**
-     * Lista de status a filtrar. Um filtro `status` explícito prevalece
-     * sobre os `includeDone`/`includeExpired` (o utilizador pediu aqueles
-     * estados). Sem `status`, exclui `done`/`expired` salvo inclusão pedida.
+     * Lista de status a filtrar.
+     *
+     * Sem filtro de estado a lista traz o **histórico completo** (todos os
+     * estados, incluindo `done` e `expired`) — pedido do utilizador, agora
+     * seguro porque a listagem é paginada. `openOnly=true` restringe aos
+     * estados abertos; um `status` explícito continua a prevalecer sobre
+     * tudo. `includeDone`/`includeExpired` são aceites por compatibilidade
+     * mas já não mudam nada (o histórico já vinha por omissão).
      *
      * @param  array<string, mixed>  $filters
      * @return list<string>|null
@@ -76,21 +146,16 @@ class TaskQuery
             return array_values($filters['status']);
         }
 
-        $statuses = [];
-
-        if (($filters['includeDone'] ?? false) === true) {
-            $statuses[] = TaskStatus::Done->value;
+        if (($filters['openOnly'] ?? false) === true) {
+            return [
+                TaskStatus::Todo->value,
+                TaskStatus::InProgress->value,
+                TaskStatus::Postponed->value,
+            ];
         }
 
-        if (($filters['includeExpired'] ?? false) === true) {
-            $statuses[] = TaskStatus::Expired->value;
-        }
-
-        $open = [TaskStatus::Todo->value, TaskStatus::InProgress->value, TaskStatus::Postponed->value];
-
-        // Sem filtro de estado: tudo aberto + o que foi pedido incluir. Com
-        // `includeDone`/`includeExpired` os abertos continuam sempre presentes.
-        return array_values(array_unique([...$open, ...$statuses]));
+        // `null` = sem restrição de estado (histórico completo).
+        return null;
     }
 
     /**
@@ -189,6 +254,6 @@ class TaskQuery
             default => $query->orderByRaw($urgencyOrder)->orderByRaw($nullsLast)->orderBy('due_date')->orderByDesc('created_at'),
         };
 
-        return $query->limit(self::LIST_LIMIT);
+        return $query;
     }
 }

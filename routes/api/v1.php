@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\V1\Categories\CategoryController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\Tasks\TaskController;
+use App\Http\Controllers\Api\V1\Timer\TimerController;
+use App\Http\Controllers\Api\V1\Timer\TimeSummaryController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -57,5 +59,13 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/tasks/{id}/reopen', [TaskController::class, 'reopen']);
         Route::post('/tasks/{id}/postpone', [TaskController::class, 'postpone']);
         Route::post('/tasks/{id}/notes', [TaskController::class, 'storeNote']);
+
+        // Timer (Fase 8): início/pausa/retoma, entradas de tempo, resumo.
+        Route::post('/tasks/{id}/timer/start', [TimerController::class, 'start']);
+        Route::post('/tasks/{id}/timer/pause', [TimerController::class, 'pause']);
+        Route::post('/tasks/{id}/timer/resume', [TimerController::class, 'resume']);
+        Route::get('/tasks/{id}/time-entries', [TimerController::class, 'entries']);
+        Route::get('/timer/active', [TimerController::class, 'active']);
+        Route::get('/time/summary', [TimeSummaryController::class, 'index']);
     });
 });

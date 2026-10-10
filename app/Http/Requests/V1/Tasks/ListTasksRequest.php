@@ -6,6 +6,7 @@ namespace App\Http\Requests\V1\Tasks;
 
 use App\Enums\TaskStatus;
 use App\Enums\Urgency;
+use App\Support\PageResponse;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
@@ -15,8 +16,10 @@ use Illuminate\Validation\Rule;
  * Filtros da listagem de tarefas (doc 07), todos opcionais: `category`,
  * `urgency`, `status` (um ou vários separados por vírgula), `projectId`
  * (UUID do utilizador ou `none`), `q`, `dueFrom`/`dueTo` (`YYYY-MM-DD`),
- * `includeDone`/`includeExpired` (booleans, `false` por omissão) e `sort`
- * (`urgency|dueDate|createdAt`).
+ * `openOnly` (boolean; restringe às tarefas abertas) e `sort`
+ * (`urgency|dueDate|createdAt`). Sem `status` nem `openOnly` a lista traz o
+ * histórico completo (concluídas e expiradas incluídas). A listagem é
+ * paginada com `page` (≥ 1) e `perPage` (1…100, 20 por omissão).
  */
 class ListTasksRequest extends FormRequest
 {
@@ -40,7 +43,10 @@ class ListTasksRequest extends FormRequest
             'dueTo' => ['sometimes', 'nullable', 'string', $this->dateRule()],
             'includeDone' => ['sometimes', 'string', 'in:true,false,0,1'],
             'includeExpired' => ['sometimes', 'string', 'in:true,false,0,1'],
+            'openOnly' => ['sometimes', 'string', 'in:true,false,0,1'],
             'sort' => ['sometimes', 'nullable', 'string', Rule::in(['urgency', 'dueDate', 'createdAt'])],
+            'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'perPage' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:'.PageResponse::MAX_PER_PAGE],
         ];
     }
 
@@ -53,7 +59,11 @@ class ListTasksRequest extends FormRequest
             'urgency.in' => 'A urgência indicada não é válida.',
             'includeDone.in' => 'Valor inválido para includeDone (use true ou false).',
             'includeExpired.in' => 'Valor inválido para includeExpired (use true ou false).',
+            'openOnly.in' => 'Valor inválido para openOnly (use true ou false).',
             'sort.in' => 'A ordenação indicada não é válida.',
+            'page.min' => 'A página tem de ser 1 ou superior.',
+            'perPage.max' => 'Cada página pode ter no máximo '.PageResponse::MAX_PER_PAGE.' tarefas.',
+            'perPage.min' => 'Cada página tem de ter pelo menos 1 tarefa.',
         ];
     }
 

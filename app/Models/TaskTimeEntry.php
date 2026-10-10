@@ -38,6 +38,15 @@ class TaskTimeEntry extends Model
         'created_at' => 'datetime',
     ];
 
+    /**
+     * Apenas entradas de um utilizador (todas as queries de tempo são sempre
+     * com scoping por utilizador — regra 6).
+     */
+    public function scopeForUser($query, int $userId)
+    {
+        return $query->where('user_id', $userId);
+    }
+
     public function task(): BelongsTo
     {
         return $this->belongsTo(Task::class);
@@ -51,14 +60,5 @@ class TaskTimeEntry extends Model
     public function scopeOpen($query)
     {
         return $query->whereNull('ended_at');
-    }
-
-    public function seconds(): int
-    {
-        if ($this->ended_at === null) {
-            return (int) $this->started_at->diffInSeconds(now());
-        }
-
-        return (int) $this->started_at->diffInSeconds($this->ended_at);
     }
 }

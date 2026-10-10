@@ -93,12 +93,19 @@ class NotificationPreference extends Model
         if ($channel === 'email' && ! $this->email_enabled) {
             return false;
         }
+
         if ($channel === 'in_app' && ! $this->in_app_enabled) {
             return false;
         }
 
         $types = $this->typesWithDefaults();
 
-        return (bool) ($types[$type][$channel] ?? false);
+        // O canal chama-se `in_app` no código (e na `notification_dispatch_log`),
+        // mas a chave no array `types` — igual ao contrato das settings — é
+        // `inApp`. Sem esta tradução a procura encontrava sempre `null` e
+        // nenhum tipo ficava activo no canal in-app.
+        $key = $channel === 'in_app' ? 'inApp' : $channel;
+
+        return (bool) ($types[$type][$key] ?? false);
     }
 }

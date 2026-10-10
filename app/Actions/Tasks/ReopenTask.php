@@ -8,10 +8,12 @@ use App\Enums\ActivityType;
 use App\Enums\TaskStatus;
 use App\Exceptions\DomainRuleException;
 use App\Models\Task;
+use App\Models\TaskTimeEntry;
 use App\Models\User;
 use App\Services\CloseOpenTimer;
 use App\Services\RecordActivity;
 use App\Services\TaskStateMachine;
+use App\Services\TimerService;
 use Illuminate\Support\Facades\DB;
 
 class ReopenTask
@@ -40,7 +42,7 @@ class ReopenTask
         app(TaskStateMachine::class)->assertCan($task->status, TaskStatus::Todo);
 
         DB::transaction(function () use ($user, $task): void {
-            app(CloseOpenTimer::class)->handle($task, 'pause');
+            $stoppedEntry = app(CloseOpenTimer::class)->handle($task, 'pause');
 
             $task->update([
                 'status' => TaskStatus::Todo,
@@ -53,6 +55,15 @@ class ReopenTask
                 ActivityType::StatusChanged,
                 'Estado alterado para '.TaskStatus::Todo->label(),
             );
+
+            if ($stoppedEntry instanceof TaskTimeEntry) {
+                app(RecordActivity::class)->record(
+                    $user,
+                    $task,
+                    ActivityType::TimerStopped,
+                    app(TimerService::class)->stoppedMessage($stoppedEntry),
+                );
+            }
         });
 
         $task->setRelation('user', $user);

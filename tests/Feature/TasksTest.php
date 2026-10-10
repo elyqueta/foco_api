@@ -148,6 +148,12 @@ class TasksTest extends TestCase
     #[Test]
     public function store_rejects_past_due_date_but_accepts_today_and_future(): void
     {
+        // Relógio fixo a meio do dia: "hoje" tem de ser o mesmo dia no fuso do
+        // servidor (UTC) e no fuso do utilizador (a factory cria em
+        // África/Luanda, UTC+1) — sem isso o teste falha entre as 23:00 e as
+        // 23:59 UTC.
+        Carbon::setTestNow('2026-10-11T12:00:00');
+
         $this->actingAsUser();
 
         $this->postJson('/api/v1/tasks', ['title' => 'Exame', 'dueDate' => now()->subDay()->format('Y-m-d')])
@@ -752,32 +758,84 @@ class TasksTest extends TestCase
     // ---- filtros ---------------------------------------------------------
 
     #[Test]
-    public function index_excludes_done_and_expired_by_default(): void
+    public function index_includes_the_whole_history_by_default(): void
     {
+        Carbon::setTestNow('2026-10-11T12:00:00');
+
         $user = $this->actingAsUser();
 
         $open = $this->makeTask($user, ['status' => 'todo', 'due_date' => now()->addWeek()->format('Y-m-d')]);
         Task::factory()->done()->create(['user_id' => $user->id, 'due_date' => now()->addWeek()->format('Y-m-d')]);
         Task::factory()->expired()->create(['user_id' => $user->id]);
 
+        // Sem filtros: concluídas e expiradas vêm também (histórico) — a
+        // paginação garante que a resposta não cresce sem limite.
         $response = $this->getJson('/api/v1/tasks')->assertOk();
 
-        $this->assertArrayNotHasKey('activity', $response->json('0'));
-        $this->assertSame($open->id, $response->json('0.id'));
+        $this->assertArrayNotHasKey('activity', $response->json('items.0'));
+        $this->assertSame(3, $response->json('total'));
+        $this->assertSame(3, $response->json('counts.todo') + $response->json('counts.done') + $response->json('counts.expired'));
+        $this->assertContains($open->id, $response->json('items.*.id'));
     }
 
     #[Test]
-    public function index_can_include_done_and_expired(): void
+    public function open_only_restricts_the_list_to_open_tasks(): void
     {
+        Carbon::setTestNow('2026-10-11T12:00:00');
+
+        $user = $this->actingAsUser();
+
+        $open = $this->makeTask($user, ['status' => 'todo', 'due_date' => now()->addWeek()->format('Y-m-d')]);
+        Task::factory()->done()->create(['user_id' => $user->id, 'due_date' => now()->addWeek()->format('Y-m-d')]);
+        Task::factory()->expired()->create(['user_id' => $user->id]);
+
+        $response = $this->getJson('/api/v1/tasks?openOnly=true')->assertOk();
+
+        $this->assertSame(1, $response->json('total'));
+        $this->assertSame($open->id, $response->json('items.0.id'));
+
+        // As contagens continuam a cobrir todos os estados.
+        $this->assertSame(3, $response->json('counts.todo') + $response->json('counts.done') + $response->json('counts.expired'));
+    }
+
+    #[Test]
+    public function an_explicit_status_filter_still_wins_over_open_only(): void
+    {
+        Carbon::setTestNow('2026-10-11T12:00:00');
+
+        $user = $this->actingAsUser();
+
+        $done = Task::factory()->done()->create(['user_id' => $user->id, 'due_date' => now()->addWeek()->format('Y-m-d')]);
+
+        $this->getJson('/api/v1/tasks?status=done&openOnly=true')
+            ->assertOk()
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $done->id);
+    }
+
+    #[Test]
+    public function the_deprecated_include_flags_are_still_accepted(): void
+    {
+        Carbon::setTestNow('2026-10-11T12:00:00');
+
         $user = $this->actingAsUser();
 
         $this->makeTask($user, ['status' => 'todo', 'due_date' => now()->addWeek()->format('Y-m-d')]);
         Task::factory()->done()->create(['user_id' => $user->id, 'due_date' => now()->addWeek()->format('Y-m-d')]);
         Task::factory()->expired()->create(['user_id' => $user->id]);
 
+        // Continuam aceites (o front pode ainda enviá-los): já não mudam o
+        // resultado, porque o histórico completo passou a ser a omissão.
         $this->getJson('/api/v1/tasks?includeDone=true&includeExpired=true')
             ->assertOk()
-            ->assertJsonCount(3);
+            ->assertJsonCount(3, 'items')
+            ->assertJsonPath('counts.todo', 1)
+            ->assertJsonPath('counts.done', 1)
+            ->assertJsonPath('counts.expired', 1);
+
+        $this->getJson('/api/v1/tasks?includeDone=false')
+            ->assertOk()
+            ->assertJsonCount(3, 'items');
     }
 
     #[Test]
@@ -808,28 +866,28 @@ class TasksTest extends TestCase
         ]);
 
         $this->getJson('/api/v1/tasks?urgency=critical')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', $critical->id);
+            ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $critical->id);
 
         $this->getJson('/api/v1/tasks?status=todo,in_progress')
-            ->assertOk()->assertJsonCount(3);
+            ->assertOk()->assertJsonCount(3, 'items');
 
         $this->getJson('/api/v1/tasks?category=Inexistente')
-            ->assertOk()->assertJsonCount(0);
+            ->assertOk()->assertJsonCount(0, 'items');
 
         $this->getJson('/api/v1/tasks?category=professional')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', $medium->id);
+            ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $medium->id);
 
         $this->getJson('/api/v1/tasks?q=loja')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', $medium->id);
+            ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $medium->id);
 
         $this->getJson('/api/v1/tasks?q=angular')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', $medium->id);
+            ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $medium->id);
 
         $this->getJson('/api/v1/tasks?projectId=none')
-            ->assertOk()->assertJsonCount(2);
+            ->assertOk()->assertJsonCount(2, 'items');
 
         $this->getJson('/api/v1/tasks?projectId='.$project->id)
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', $medium->id);
+            ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $medium->id);
 
         $this->assertNotNull($loose->id);
     }
@@ -846,12 +904,12 @@ class TasksTest extends TestCase
         // Janela dueFrom/dueTo.
         $this->getJson('/api/v1/tasks?dueFrom='.now()->format('Y-m-d').'&dueTo='.now()->addDays(2)->format('Y-m-d'))
             ->assertOk()
-            ->assertJsonCount(1)
-            ->assertJsonPath('0.id', $soon->id);
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $soon->id);
 
         // sort=dueDate: nulos por último.
         $response = $this->getJson('/api/v1/tasks?sort=dueDate')->assertOk();
-        $this->assertSame([$soon->id, $later->id, $none->id], $response->json('*.id'));
+        $this->assertSame([$soon->id, $later->id, $none->id], $response->json('items.*.id'));
     }
 
     #[Test]
@@ -864,7 +922,7 @@ class TasksTest extends TestCase
 
         $response = $this->getJson('/api/v1/tasks')->assertOk();
 
-        $this->assertSame([$critical->id, $low->id], $response->json('*.id'));
+        $this->assertSame([$critical->id, $low->id], $response->json('items.*.id'));
     }
 
     #[Test]

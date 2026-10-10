@@ -15,6 +15,7 @@ use App\Actions\Tasks\ReopenTask;
 use App\Actions\Tasks\TaskQuery;
 use App\Actions\Tasks\UpdateTask;
 use App\Enums\Urgency;
+use App\Http\Controllers\Api\V1\Concerns\FindsOwnedTask;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Tasks\ListTasksRequest;
 use App\Http\Requests\V1\Tasks\PostponeTaskRequest;
@@ -26,13 +27,14 @@ use App\Http\Resources\V1\TaskResource;
 use App\Models\Category;
 use App\Models\Task;
 use App\Models\User;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
+use App\Support\PageResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class TaskController extends Controller
 {
+    use FindsOwnedTask;
+
     /**
      * Tecto do histórico devolvido no detalhe: entradas mais recentes
      * primeiro, com um máximo razoável.
@@ -40,9 +42,18 @@ class TaskController extends Controller
     private const ACTIVITY_LIMIT = 100;
 
     /**
-     * Lista as tarefas do utilizador (sem `activity`). Corre a expiração
-     * preguiçosa antes de listar (doc 07, regras §5.2) para que uma tarefa
-     * vencida apareça já `expired`. Aplica os filtros opcionais.
+     * Lista as tarefas do utilizador (sem `activity`), paginada. Corre a
+     * expiração preguiçosa antes de listar (doc 07, regras §5.2) para que uma
+     * tarefa vencida apareça já `expired`. Aplica os filtros opcionais.
+     *
+     * Por omissão traz o **histórico completo** — concluídas e expiradas
+     * incluídas (pedido do utilizador: são fundamentais para o histórico);
+     * `openOnly=true` restringe às abertas e `status=…` filtra à mão.
+     *
+     * Resposta: `{ items, page, perPage, total, totalPages, counts }`, onde
+     * `counts` traz as contagens por estado com os mesmos filtros **excepto
+     * o de estado** — para o front desenhar os separadores sem pedir uma
+     * lista por estado.
      */
     public function index(ListTasksRequest $request): JsonResponse
     {
@@ -55,18 +66,33 @@ class TaskController extends Controller
 
         if ($filters === null) {
             // Categoria do filtro inexistente → lista vazia (é um filtro).
-            return TaskResource::collection([])->response();
+            return response()->json(PageResponse::empty());
         }
 
-        $tasks = app(TaskQuery::class)
-            ->apply($user->tasks()->getQuery(), $filters, $user)
-            ->get();
+        $filters['page'] = max(1, (int) $request->integer('page', 1));
+        $filters['perPage'] = max(1, (int) $request->integer('perPage', PageResponse::DEFAULT_PER_PAGE));
 
-        // Sem N+1 no `isOverdue`: a relação `user` é a mesma para toda a
-        // lista, por isso é injectada em vez de carregada tarefa a tarefa.
-        $tasks->each(fn (Task $task) => $task->setRelation('user', $user));
+        // `with('activeTimeEntry')`: a relação aberta de cada tarefa vem numa
+        // única query extra — o bloco `timer` do recurso não faz N+1.
+        $tasks = app(TaskQuery::class)->paginate(
+            $user->tasks()->with('activeTimeEntry')->getQuery(),
+            $filters,
+            $user,
+            $filters['page'],
+            $filters['perPage'],
+        );
 
-        return TaskResource::collection($tasks)->response();
+        // Sem N+1 no `isOverdue` (que consulta o fuso do utilizador): a
+        // relação `user` é a mesma para toda a página, por isso é injectada em
+        // vez de carregada tarefa a tarefa.
+        $tasks->getCollection()->each(fn (Task $task) => $task->setRelation('user', $user));
+
+        // `items` no formato do contrato (TaskResource), não o modelo cru.
+        $tasks->through(fn (Task $task): array => TaskResource::make($task)->resolve());
+
+        $counts = app(TaskQuery::class)->statusCounts($user->tasks()->getQuery(), $filters, $user);
+
+        return response()->json(PageResponse::from($tasks, $counts));
     }
 
     /**
@@ -92,6 +118,7 @@ class TaskController extends Controller
         $task = $this->findTask($request, (string) $id);
 
         $task->load([
+            'activeTimeEntry',
             'activity' => fn ($query) => $query->limit(self::ACTIVITY_LIMIT),
         ]);
 
@@ -214,32 +241,6 @@ class TaskController extends Controller
     }
 
     /**
-     * Procura sempre dentro das tarefas do utilizador (regra 6): tarefa de
-     * outro utilizador devolve `404 Não encontrado.`. Um `id` que não é UUID
-     * devolve também 404 — no PostgreSQL a coluna é `uuid` e a query falharia
-     * com erro de sintaxe (503).
-     */
-    private function findTask(Request $request, string $id): Task
-    {
-        if (! Str::isUuid($id)) {
-            throw new ModelNotFoundException;
-        }
-
-        /** @var User $user */
-        $user = $request->user();
-
-        $task = $user->tasks()->whereKey($id)->first();
-
-        if (! $task instanceof Task) {
-            throw new ModelNotFoundException;
-        }
-
-        $this->authorize('view', $task);
-
-        return $task;
-    }
-
-    /**
      * Normaliza os filtros validados para o `TaskQuery`. Devolve `null`
      * quando a categoria do filtro não existe (lista vazia).
      *
@@ -281,8 +282,11 @@ class TaskController extends Controller
             }
         }
 
-        $filters['includeDone'] = $this->boolish($validated, 'includeDone');
-        $filters['includeExpired'] = $this->boolish($validated, 'includeExpired');
+        // Por omissão a lista traz o histórico completo (concluídas e
+        // expiradas incluídas). `openOnly=true` restringe às abertas.
+        // `includeDone`/`includeExpired` continuam aceites (o front pode
+        // ainda enviá-los) mas já não alteram o resultado.
+        $filters['openOnly'] = $this->boolish($validated, 'openOnly');
 
         return $filters;
     }

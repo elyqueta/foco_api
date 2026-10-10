@@ -10,10 +10,12 @@ use App\Enums\TaskStatus;
 use App\Enums\Urgency;
 use App\Exceptions\DomainRuleException;
 use App\Models\Task;
+use App\Models\TaskTimeEntry;
 use App\Models\User;
 use App\Services\CloseOpenTimer;
 use App\Services\RecordActivity;
 use App\Services\TaskStateMachine;
+use App\Services\TimerService;
 use App\Services\UserClock;
 use Illuminate\Support\Facades\DB;
 
@@ -53,7 +55,7 @@ class UpdateTask
 
             $task->update($changes);
 
-            $this->recordActivity($user, $task, $changes, $transition, $stoppedEntry !== null);
+            $this->recordActivity($user, $task, $changes, $transition, $stoppedEntry);
         });
 
         $task->setRelation('user', $user);
@@ -279,7 +281,7 @@ class UpdateTask
      * @param  array<string, mixed>  $changes
      * @param  array<string, mixed>  $transition
      */
-    private function recordActivity(User $user, Task $task, array $changes, array $transition, bool $closedTimer): void
+    private function recordActivity(User $user, Task $task, array $changes, array $transition, ?TaskTimeEntry $stoppedEntry): void
     {
         $record = app(RecordActivity::class);
 
@@ -297,8 +299,8 @@ class UpdateTask
             $record->record($user, $task, $lifecycle[0], $lifecycle[1]);
         }
 
-        if ($closedTimer) {
-            $record->record($user, $task, ActivityType::TimerStopped, 'Timer parado');
+        if ($stoppedEntry instanceof TaskTimeEntry) {
+            $record->record($user, $task, ActivityType::TimerStopped, app(TimerService::class)->stoppedMessage($stoppedEntry));
         }
 
         if (array_key_exists('next_step', $changes)) {
