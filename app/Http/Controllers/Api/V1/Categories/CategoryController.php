@@ -11,6 +11,7 @@ use App\Http\Requests\V1\Categories\StoreCategoryRequest;
 use App\Http\Resources\V1\CategoryResource;
 use App\Models\Category;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -65,7 +66,9 @@ class CategoryController extends Controller
         $category = app(ResolveCategory::class)->handle($user, $name);
 
         if ($category === null) {
-            abort(404);
+            // Recurso inexistente (contrato: "Não encontrado.") — diferente de
+            // rota inexistente (ROUTE_NOT_FOUND).
+            throw new ModelNotFoundException;
         }
 
         $this->authorize('delete', $category);
