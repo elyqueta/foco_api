@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Actions\ActivityLog;
 use App\Actions\Projects\CreateProject;
 use App\Actions\Tasks\CreateTask;
 use App\Enums\ActivityType;
 use App\Enums\TaskStatus;
 use App\Models\User;
+use App\Services\RecordActivity;
 use Illuminate\Database\Seeder;
 
 class DemoDataSeeder extends Seeder
@@ -93,7 +93,7 @@ class DemoDataSeeder extends Seeder
             'status' => TaskStatus::InProgress,
         ]);
 
-        app(ActivityLog::class)->record(
+        app(RecordActivity::class)->record(
             user: $user,
             subject: $catalogo,
             type: ActivityType::StatusChanged,

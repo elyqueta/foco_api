@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Actions\Tasks;
 
-use App\Actions\ActivityLog;
 use App\Actions\Categories\ResolveCategory;
 use App\Enums\ActivityType;
 use App\Enums\TaskStatus;
@@ -12,6 +11,7 @@ use App\Enums\Urgency;
 use App\Exceptions\DomainRuleException;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\RecordActivity;
 use App\Services\UserClock;
 use Illuminate\Support\Facades\DB;
 
@@ -40,7 +40,7 @@ class CreateTask
                 'tracked_seconds' => 0,
             ]);
 
-            app(ActivityLog::class)->record(
+            app(RecordActivity::class)->record(
                 user: $user,
                 subject: $task,
                 type: ActivityType::Created,

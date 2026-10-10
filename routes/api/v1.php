@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Categories\CategoryController;
+use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
-| API v1 — auth, definições e categorias
+| API v1 — auth, definições, categorias e projetos
 |--------------------------------------------------------------------------
 | Prefixo /api/v1 no URL E a versão na estrutura do código: controllers em
 | App\Http\Controllers\Api\V1, requests em App\Http\Requests\V1, resources
@@ -36,5 +37,13 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/categories', [CategoryController::class, 'index']);
         Route::post('/categories', [CategoryController::class, 'store']);
         Route::delete('/categories/{name}', [CategoryController::class, 'destroy']);
+
+        // Projetos (Fase 6).
+        Route::get('/projects', [ProjectController::class, 'index']);
+        Route::post('/projects', [ProjectController::class, 'store']);
+        Route::get('/projects/{id}', [ProjectController::class, 'show']);
+        Route::patch('/projects/{id}', [ProjectController::class, 'update']);
+        Route::delete('/projects/{id}', [ProjectController::class, 'destroy']);
+        Route::post('/projects/{id}/notes', [ProjectController::class, 'storeNote']);
     });
 });

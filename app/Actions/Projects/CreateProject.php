@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Actions\Projects;
 
-use App\Actions\ActivityLog;
 use App\Actions\Categories\ResolveCategory;
 use App\Enums\ActivityType;
 use App\Enums\ProjectStatus;
@@ -12,6 +11,7 @@ use App\Enums\Urgency;
 use App\Exceptions\DomainRuleException;
 use App\Models\Project;
 use App\Models\User;
+use App\Services\RecordActivity;
 use Illuminate\Support\Facades\DB;
 
 class CreateProject
@@ -34,14 +34,16 @@ class CreateProject
                 'color' => $data['color'],
             ]);
 
-            app(ActivityLog::class)->record(
+            app(RecordActivity::class)->record(
                 user: $user,
                 subject: $project,
                 type: ActivityType::Created,
                 message: 'Projeto criado',
             );
 
-            return $project->load('activity');
+            return $project
+                ->loadCount(Project::progressCounts())
+                ->load('activity');
         });
     }
 
@@ -71,14 +73,14 @@ class CreateProject
             $status = ProjectStatus::tryFrom((string) $status) ?? ProjectStatus::Active;
         }
 
-        $dueDate = $data['dueDate'] ?? null;
-        if (is_string($dueDate) && $dueDate !== '') {
-            $dueDate = substr($dueDate, 0, 10);
-        } else {
-            $dueDate = null;
-        }
+        $dueDate = ProjectDueDate::normalize($data['dueDate'] ?? null);
 
         $nextStep = trim((string) ($data['nextStep'] ?? ''));
+
+        $color = trim((string) ($data['color'] ?? ''));
+        if ($color === '') {
+            $color = Project::DEFAULT_COLOR;
+        }
 
         return [
             'name' => $title,
@@ -89,7 +91,7 @@ class CreateProject
             'can_postpone' => (bool) ($data['canPostpone'] ?? true),
             'due_date' => $dueDate,
             'next_step' => $nextStep,
-            'color' => trim((string) ($data['color'] ?? '#6C5CE7')),
+            'color' => $color,
         ];
     }
 }
