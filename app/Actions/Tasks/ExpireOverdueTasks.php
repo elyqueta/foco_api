@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Actions\Tasks;
 
 use App\Enums\ActivityType;
+use App\Enums\NotificationType;
 use App\Enums\TaskStatus;
 use App\Models\User;
+use App\Services\NotificationDispatcher;
 use App\Services\RecordActivity;
 use App\Services\UserClock;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +25,9 @@ class ExpireOverdueTasks
      * query. Para cada uma, numa transação própria: `status=expired`,
      * `expired_at=now` e actividade `expired`.
      *
-     * Notificação `task_expired` (dedupe por tarefa) é criada na Fase 9/10.
+     * Notificação `task_expired` (doc 09), uma por tarefa e dia de
+     * expiração (dedupe `expired:{data}`), disparada **depois** do commit
+     * de cada tarefa — falhar no envio nunca desfaz a expiração.
      */
     public function forUser(User $user): int
     {
@@ -39,7 +43,9 @@ class ExpireOverdueTasks
         $expired = 0;
 
         foreach ($tasks as $task) {
-            DB::transaction(function () use ($user, $task, &$expired): void {
+            $expiredAt = now();
+
+            $flipped = DB::transaction(function () use ($user, $task, $expiredAt): bool {
                 // Update "guardado": só escreve se a tarefa ainda está aberta.
                 // Sob concorrência (dois GET/tasks, ou GET a sobrepor-se ao
                 // tick/scheduler) só um escritor inverte o estado; o outro vê
@@ -49,14 +55,12 @@ class ExpireOverdueTasks
                     ->whereIn('status', [TaskStatus::Todo->value, TaskStatus::InProgress->value])
                     ->update([
                         'status' => TaskStatus::Expired,
-                        'expired_at' => now(),
+                        'expired_at' => $expiredAt,
                     ]);
 
                 if ($flipped === 0) {
-                    return;
+                    return false;
                 }
-
-                $expired++;
 
                 app(RecordActivity::class)->record(
                     $user,
@@ -64,7 +68,23 @@ class ExpireOverdueTasks
                     ActivityType::Expired,
                     'Tarefa expirada por prazo vencido',
                 );
+
+                return true;
             });
+
+            if (! $flipped) {
+                continue;
+            }
+
+            $expired++;
+
+            app(NotificationDispatcher::class)->dispatch(
+                $user,
+                NotificationType::TaskExpired,
+                $task,
+                'expired:'.$expiredAt->format('Y-m-d'),
+                ['referenceAt' => $task->due_date ?? $expiredAt],
+            );
         }
 
         return $expired;

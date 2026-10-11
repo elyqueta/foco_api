@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace App\Actions\Tasks;
 
 use App\Enums\ActivityType;
+use App\Enums\NotificationType;
 use App\Enums\TaskStatus;
+use App\Models\Project;
 use App\Models\Task;
 use App\Models\TaskTimeEntry;
 use App\Models\User;
 use App\Services\CloseOpenTimer;
+use App\Services\NotificationDispatcher;
+use App\Services\NotifyEstimateExceeded;
 use App\Services\RecordActivity;
 use App\Services\TaskStateMachine;
 use App\Services\TimerService;
@@ -26,20 +30,25 @@ class CompleteTask
      * A conclusão é permitida de `todo`, `in_progress`, `postponed` (concluir
      * antecipadamente) e `expired` (concluída tarde) — nunca de `done`.
      *
+     * Notificações (doc 09), disparadas **depois** do commit para não serem
+     * desfeitas por um rollback: `task_completed`, `task_estimate_exceeded`
+     * (quando o tempo registado atingiu a estimativa) e
+     * `project_ready_to_complete` (quando o projeto fica todo concluído).
+     *
      * @return array{task: Task, suggestCompleteProject: array{id: string, name: string}|null}
      */
     public function handle(User $user, Task $task): array
     {
         app(TaskStateMachine::class)->assertCan($task->status, TaskStatus::Done);
 
-        $suggest = null;
+        $completedAt = now();
 
-        DB::transaction(function () use ($user, $task, &$suggest): void {
+        DB::transaction(function () use ($user, $task, $completedAt): void {
             $stoppedEntry = app(CloseOpenTimer::class)->handle($task, 'complete');
 
             $task->update([
                 'status' => TaskStatus::Done,
-                'completed_at' => now(),
+                'completed_at' => $completedAt,
             ]);
 
             app(RecordActivity::class)->record(
@@ -59,21 +68,45 @@ class CompleteTask
             }
         });
 
-        $suggest = $this->suggestCompleteProject($task);
+        $project = $this->projectReadyToComplete($task);
+
+        $dispatcher = app(NotificationDispatcher::class);
+
+        $dispatcher->dispatch(
+            $user,
+            NotificationType::TaskCompleted,
+            $task,
+            'completed:'.$completedAt->toIso8601String(),
+            ['trackedSeconds' => (int) $task->tracked_seconds],
+        );
+
+        app(NotifyEstimateExceeded::class)->handle($user, $task);
+
+        if ($project instanceof Project) {
+            $dispatcher->dispatch(
+                $user,
+                NotificationType::ProjectReadyToComplete,
+                $project,
+                'ready:'.$completedAt->toIso8601String(),
+            );
+        }
 
         $task->setRelation('user', $user);
 
-        return ['task' => $task->load('activity'), 'suggestCompleteProject' => $suggest];
+        return [
+            'task' => $task->load('activity'),
+            'suggestCompleteProject' => $project instanceof Project
+                ? ['id' => $project->id, 'name' => $project->name]
+                : null,
+        ];
     }
 
     /**
-     * Sugestão de concluir o projeto: só quando a tarefa pertence a um
-     * projeto e **todas** as tarefas do projeto estão `done`. Uma `expired`
-     * (ou qualquer não-`done`) bloqueia a sugestão (doc 07).
-     *
-     * @return array{id: string, name: string}|null
+     * Projeto que fica pronto a concluir com esta tarefa: só quando a
+     * tarefa pertence a um projeto e **todas** as tarefas do projeto estão
+     * `done`. Uma `expired` (ou qualquer não-`done`) bloqueia (doc 07).
      */
-    private function suggestCompleteProject(Task $task): ?array
+    private function projectReadyToComplete(Task $task): ?Project
     {
         if ($task->project_id === null) {
             return null;
@@ -84,7 +117,7 @@ class CompleteTask
             'tasks as done_tasks_count' => fn ($query) => $query->where('status', TaskStatus::Done->value),
         ])->first();
 
-        if (! $project || (int) $project->tasks_count === 0) {
+        if (! $project instanceof Project || (int) $project->tasks_count === 0) {
             return null;
         }
 
@@ -92,6 +125,6 @@ class CompleteTask
             return null;
         }
 
-        return ['id' => $project->id, 'name' => $project->name];
+        return $project;
     }
 }

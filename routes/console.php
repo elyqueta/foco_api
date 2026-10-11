@@ -12,3 +12,7 @@ Artisan::command('inspire', function () {
 
 // Tokens Sanctum expirados são removidos diariamente (usado também no tick).
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
+
+// Retenção das notificações in-app: lidas > 30 dias e todas > 90 dias
+// (doc 09 tarefa 9.6; chamado também pelo tick da Fase 10).
+Schedule::command('foco:prune-notifications')->daily();

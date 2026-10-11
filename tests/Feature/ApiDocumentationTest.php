@@ -44,11 +44,16 @@ class ApiDocumentationTest extends TestCase
                     '/v1/tasks/{id}/time-entries',
                     '/v1/timer/active',
                     '/v1/time/summary',
+                    '/v1/notifications',
+                    '/v1/notifications/unread-count',
+                    '/v1/notifications/read-all',
+                    '/v1/notifications/{id}/read',
+                    '/v1/notifications/{id}',
                     '/health',
                 ],
                 'components' => [
                     'securitySchemes' => ['bearerAuth'],
-                    'schemas' => ['Project', 'ProjectInput', 'Task', 'TaskInput', 'ActivityEntry', 'TimeEntry', 'TimeSummary'],
+                    'schemas' => ['Project', 'ProjectInput', 'Task', 'TaskInput', 'ActivityEntry', 'TimeEntry', 'TimeSummary', 'Notification'],
                 ],
             ])
             ->assertJsonPath('openapi', '3.0.3')
@@ -80,6 +85,17 @@ class ApiDocumentationTest extends TestCase
             ->assertJsonPath('paths./v1/tasks/{id}/time-entries.get.responses.200.content.application/json.schema.items.$ref', '#/components/schemas/TimeEntry')
             ->assertJsonPath('paths./v1/timer/active.get.responses.200.content.application/json.schema.properties.task.$ref', '#/components/schemas/Task')
             ->assertJsonPath('paths./v1/time/summary.get.responses.200.content.application/json.schema.$ref', '#/components/schemas/TimeSummary')
+            ->assertJsonPath('paths./v1/notifications.get.security.0.bearerAuth', [])
+            ->assertJsonPath('paths./v1/notifications.get.responses.200.content.application/json.schema.items.$ref', '#/components/schemas/Notification')
+            ->assertJsonPath('paths./v1/notifications.get.parameters.2.name', 'before')
+            ->assertJsonPath('paths./v1/notifications/unread-count.get.responses.200.content.application/json.schema.properties.count.type', 'integer')
+            ->assertJsonPath('paths./v1/notifications/read-all.post.responses.200.content.application/json.schema.properties.message.example', 'Todas as notificações foram marcadas como lidas.')
+            ->assertJsonPath('paths./v1/notifications/{id}/read.post.responses.200.content.application/json.schema.properties.message.example', 'Notificação marcada como lida.')
+            ->assertJsonPath('paths./v1/notifications/{id}/read.post.responses.404.description', 'Notificação inexistente ou de outro utilizador.')
+            ->assertJsonPath('paths./v1/notifications/{id}.delete.responses.200.content.application/json.schema.properties.message.example', 'Notificação removida.')
+            ->assertJsonPath('paths./v1/notifications.delete.responses.200.content.application/json.schema.properties.message.example', 'Notificações removidas.')
+            ->assertJsonPath('components.schemas.Notification.properties.type.enum.3', 'task_completed')
+            ->assertJsonPath('components.schemas.Notification.properties.data.properties.projectId.format', 'uuid')
             ->assertJsonPath('components.schemas.TimeEntry.properties.endedReason.enum.1', 'auto_pause');
     }
 

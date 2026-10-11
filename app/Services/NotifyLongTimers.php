@@ -5,28 +5,25 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\NotificationType;
-use App\Models\NotificationDispatchLog;
 use App\Models\NotificationPreference;
 use App\Models\Task;
 use App\Models\TaskTimeEntry;
 use App\Models\User;
-use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 /**
  * Notificação `timer_running_long` (doc 08 regra 10): um timer aberto há
  * `timer_long_hours` ou mais (preferência do utilizador, 4 h por omissão)
  * gera uma notificação in-app. **Nunca pausa sozinho** — apenas avisa.
  *
- * Idempotente: **uma notificação por entrada**, garantida pelo registo em
- * `notification_dispatch_log` (índice único) com a chave
- * `timerlong:{entry_id}` — a mesma dedupe key da Fase 9, para que o
- * `NotificationDispatcher` não a volte a enviar quando passar a ser o dono
- * destes disparos. Respeita as preferências do utilizador (canal `in_app`).
+ * O envio em si é do `NotificationDispatcher` (doc 09): é ele que resolve os
+ * canais activos, garante a dedupe e faz o retry. A chave
+ * `timerlong:{entry_id}` é a mesma desde a Fase 8, para que uma notificação
+ * criada pelo comando não volte a ser enviada pelo dispatcher.
  */
 class NotifyLongTimers
 {
+    public function __construct(private readonly NotificationDispatcher $dispatcher) {}
+
     public function handle(?int $userId = null): int
     {
         // `notificationPreference` vem carregado: sem isto cada entrada aberta
@@ -55,62 +52,18 @@ class NotifyLongTimers
                 continue;
             }
 
-            if (! $this->preferences($user)->channelEnabled(NotificationType::TimerRunningLong->value, 'in_app')) {
-                continue;
-            }
-
-            if ($this->dispatch($user, $task, $entry, $seconds)) {
+            if ($this->dispatcher->dispatch(
+                $user,
+                NotificationType::TimerRunningLong,
+                $task,
+                'timerlong:'.$entry->id,
+                ['trackedSeconds' => $seconds],
+            )) {
                 $notified++;
             }
         }
 
         return $notified;
-    }
-
-    /**
-     * Escreve notificação + registo de dedupe **na mesma transação**: se a
-     * notificação falhar, o registo não fica e o tick volta a tentar.
-     */
-    private function dispatch(User $user, Task $task, TaskTimeEntry $entry, int $seconds): bool
-    {
-        try {
-            return DB::transaction(function () use ($user, $task, $entry, $seconds): bool {
-                $log = NotificationDispatchLog::firstOrCreate(
-                    [
-                        'user_id' => $user->id,
-                        'type' => NotificationType::TimerRunningLong->value,
-                        'channel' => 'in_app',
-                        'subject_id' => $task->id,
-                        'dedupe_key' => 'timerlong:'.$entry->id,
-                    ],
-                    [
-                        'subject_type' => 'task',
-                        'status' => 'sent',
-                        'sent_at' => now(),
-                    ],
-                );
-
-                // Já notificado noutra execução: nada a fazer.
-                if (! $log->wasRecentlyCreated) {
-                    return false;
-                }
-
-                $user->notifications()->create([
-                    'id' => (string) Str::uuid(),
-                    'type' => NotificationType::TimerRunningLong->value,
-                    'data' => [
-                        'title' => 'Timer ainda a correr',
-                        'body' => "O tempo de «{$task->title}» está a correr há ".app(TimerService::class)->format($seconds).'. Queres pausar?',
-                        'taskId' => $task->id,
-                    ],
-                ]);
-
-                return true;
-            });
-        } catch (QueryException) {
-            // Corrida entre dois ticks: outro já registou este envio.
-            return false;
-        }
     }
 
     private function isLong(User $user, int $seconds): bool

@@ -15,7 +15,7 @@ class ApiDocumentationController
             'info' => [
                 'title' => config('app.name', 'Foco API').' — v1',
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `409 TIMER_ALREADY_RUNNING` (o timer desta tarefa já está a correr — devolve a `task`), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, `TIMER_WRONG_STATE`, `TIMER_NOT_ALLOWED`, `TIMER_NOT_RUNNING`, `INVALID_TRANSITION`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). **Timer:** só pode existir um timer a correr por utilizador; iniciar/retomar outra tarefa pausa a actual automaticamente (`auto_pause`, devolvida em `pausedTask`). Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `409 TIMER_ALREADY_RUNNING` (o timer desta tarefa já está a correr — devolve a `task`), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, `TIMER_WRONG_STATE`, `TIMER_NOT_ALLOWED`, `TIMER_NOT_RUNNING`, `INVALID_TRANSITION`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). **Timer:** só pode existir um timer a correr por utilizador; iniciar/retomar outra tarefa pausa a actual automaticamente (`auto_pause`, devolvida em `pausedTask`). **Notificações in-app:** criadas pelo servidor nos eventos (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`) com dedupe por evento em `notification_dispatch_log`; `GET /notifications` lista, `?unread=1` filtra e `GET /notifications/unread-count` dá o badge. Lembretes de prazo e digest diário chegam com o scheduler. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
             ],
             'servers' => [
                 ['url' => '/api', 'description' => 'Base da API: rotas de domínio em /api/v1/*, sistema em /api/*'],
@@ -1271,6 +1271,193 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
+                '/v1/notifications' => [
+                    'get' => [
+                        'summary' => 'Listar notificações',
+                        'description' => 'Notificações in-app do utilizador, mais recentes primeiro (array simples, sem paginação de envelope). `?unread=1` filtra as não lidas; `?limit=` (1…100, 50 por omissão) limita a página; `?before=<uuid>` pagina para trás a partir dessa notificação. `data` traz `taskId`/`projectId` quando a notificação tem assunto.',
+                        'operationId' => 'listNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'unread',
+                                'in' => 'query',
+                                'description' => 'Só as não lidas.',
+                                'schema' => ['type' => 'boolean', 'default' => false, 'example' => true],
+                            ],
+                            [
+                                'name' => 'limit',
+                                'in' => 'query',
+                                'description' => 'Máximo de notificações devolvidas.',
+                                'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 50],
+                            ],
+                            [
+                                'name' => 'before',
+                                'in' => 'query',
+                                'description' => 'UUID da última notificação da página anterior.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de notificações.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/Notification'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Filtros inválidos (`before` desconhecido — code INVALID_CURSOR, com `errors.before`).'],
+                        ],
+                    ],
+                    'delete' => [
+                        'summary' => 'Remover todas as notificações',
+                        'description' => 'Apaga todas as notificações do utilizador.',
+                        'operationId' => 'clearNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Notificações removidas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Notificações removidas.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/unread-count' => [
+                    'get' => [
+                        'summary' => 'Contar não lidas',
+                        'description' => 'Devolve `{ count }` com o número de notificações não lidas (para o badge da app).',
+                        'operationId' => 'countUnreadNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Contagem.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'count' => ['type' => 'integer', 'example' => 3],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/read-all' => [
+                    'post' => [
+                        'summary' => 'Marcar todas como lidas',
+                        'description' => 'Marca todas as notificações do utilizador como lidas (idempotente).',
+                        'operationId' => 'readAllNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Todas marcadas como lidas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Todas as notificações foram marcadas como lidas.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/{id}/read' => [
+                    'post' => [
+                        'summary' => 'Marcar uma como lida',
+                        'description' => 'Marca a notificação como lida. Idempotente: marcar uma notificação já lida não é erro. Notificação de outro utilizador (ou `id` não-UUID) → `404`.',
+                        'operationId' => 'readNotification',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da notificação.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Notificação marcada como lida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Notificação marcada como lida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Notificação inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/{id}' => [
+                    'delete' => [
+                        'summary' => 'Remover uma notificação',
+                        'description' => 'Apaga a notificação. Notificação de outro utilizador (ou `id` não-UUID) → `404`.',
+                        'operationId' => 'deleteNotification',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da notificação.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Notificação removida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Notificação removida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Notificação inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
                 '/health' => [
                     'get' => [
                         'summary' => 'Health check',
@@ -1473,6 +1660,29 @@ class ApiDocumentationController
                                 ],
                             ],
                             'totalSeconds' => ['type' => 'integer', 'example' => 13200],
+                        ],
+                    ],
+                    'Notification' => [
+                        'type' => 'object',
+                        'description' => 'Notificação in-app (`notifications`). Criada pelo servidor nos eventos do utilizador (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`; lembretes e digest diário chegam com o scheduler). Cada evento é enviado uma única vez por canal (dedupe em `notification_dispatch_log`) e respeita as preferências de notificação do utilizador.',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'type' => [
+                                'type' => 'string',
+                                'enum' => ['task_due_soon', 'task_due_imminent', 'task_expired', 'task_completed', 'task_estimate_exceeded', 'timer_running_long', 'project_due_soon', 'project_overdue', 'project_ready_to_complete', 'task_overdue_postponed', 'daily_digest'],
+                            ],
+                            'title' => ['type' => 'string', 'example' => 'Tarefa concluída 🎉'],
+                            'body' => ['type' => 'string', 'example' => 'Concluíste «Integrar API».'],
+                            'data' => [
+                                'type' => 'object',
+                                'description' => 'Assunto da notificação, quando existe.',
+                                'properties' => [
+                                    'taskId' => ['type' => 'string', 'format' => 'uuid'],
+                                    'projectId' => ['type' => 'string', 'format' => 'uuid'],
+                                ],
+                            ],
+                            'readAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                            'createdAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
                         ],
                     ],
                 ],

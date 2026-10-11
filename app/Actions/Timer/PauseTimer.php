@@ -11,6 +11,7 @@ use App\Models\Task;
 use App\Models\TaskTimeEntry;
 use App\Models\User;
 use App\Services\CloseOpenTimer;
+use App\Services\NotifyEstimateExceeded;
 use App\Services\RecordActivity;
 use App\Services\TimerService;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,10 @@ use Illuminate\Support\Facades\DB;
  * acumula os segundos em `tracked_seconds` e mantém a tarefa `in_progress`
  * (o estado da tarefa não muda). Sem entrada aberta → `422
  * TIMER_NOT_RUNNING`.
+ *
+ * Se o tempo acumulado atingiu a estimativa da tarefa, dispara a
+ * notificação `task_estimate_exceeded` (doc 09) — fora da transação, para
+ * não ser desfeita por um rollback.
  */
 class PauseTimer
 {
@@ -52,6 +57,8 @@ class PauseTimer
 
             return $task->load('activity');
         });
+
+        app(NotifyEstimateExceeded::class)->handle($user, $task);
 
         return $task;
     }

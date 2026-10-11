@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Categories\CategoryController;
+use App\Http\Controllers\Api\V1\Notifications\NotificationController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\Tasks\TaskController;
@@ -67,5 +68,14 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/tasks/{id}/time-entries', [TimerController::class, 'entries']);
         Route::get('/timer/active', [TimerController::class, 'active']);
         Route::get('/time/summary', [TimeSummaryController::class, 'index']);
+
+        // Notificações in-app (Fase 9). As rotas estáticas vêm antes das
+        // rotas com `{id}` para não serem capturadas por elas.
+        Route::get('/notifications', [NotificationController::class, 'index']);
+        Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/notifications/read-all', [NotificationController::class, 'readAll']);
+        Route::post('/notifications/{id}/read', [NotificationController::class, 'read']);
+        Route::delete('/notifications', [NotificationController::class, 'clear']);
+        Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
     });
 });
