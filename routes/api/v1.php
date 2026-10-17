@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\ExportController;
 use App\Http\Controllers\Api\V1\ImportController;
 use App\Http\Controllers\Api\V1\ImportPromptController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationController;
+use App\Http\Controllers\Api\V1\OnboardingController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\SearchController;
 use App\Http\Controllers\Api\V1\SettingsController;
@@ -40,6 +41,10 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::patch('/auth/password', [AuthController::class, 'updatePassword']);
         Route::patch('/auth/profile', [AuthController::class, 'updateProfile']);
+
+        // Onboarding (persistido na API).
+        Route::get('/onboarding', [OnboardingController::class, 'show']);
+        Route::post('/onboarding/complete', [OnboardingController::class, 'complete']);
 
         Route::get('/settings', [SettingsController::class, 'show']);
         Route::patch('/settings', [SettingsController::class, 'update']);

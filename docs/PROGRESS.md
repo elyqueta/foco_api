@@ -91,6 +91,7 @@
    - [x] 11.5 `DataController` + rotas `DELETE /api/v1/data`, `POST /api/v1/data/seed-demo`, `POST /api/v1/data/reset-demo` (todos retornam mensagem de sucesso/erro)
    - [x] 11.6 `SearchController` + rota `GET /api/v1/search`
    - [x] 11.7 `ProductivityReportController` + `ProductivityReportRequest` + `ProductivityReport` action + `ProductivityReportResource` + rota `GET /api/v1/exports/productivity-report` (18 testes, todos verdes) + documentação OpenAPI
+   - [x] 11.8 `OnboardingController` + `CompleteOnboardingRequest` + rotas `GET /v1/auth/onboarding` e `POST /v1/auth/onboarding/complete` + migration `onboarding_completed`/`onboarding_current_step` na tabela `users` + documentação OpenAPI
 - [ ] **Fase 12** — Testes, CI, hardening, deploy Render (`docs/12-testes-qualidade-deploy-render.md`)
 - [ ] **Fase 13** — Referência de integração com o front (apenas leitura)
 

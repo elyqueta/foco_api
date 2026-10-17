@@ -362,6 +362,83 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
+                '/v1/auth/onboarding' => [
+                    'get' => [
+                        'summary' => 'Estado do onboarding',
+                        'description' => 'Devolve se o onboarding está concluído e o passo atual do utilizador autenticado.',
+                        'operationId' => 'getOnboarding',
+                        'tags' => ['Onboarding'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Estado do onboarding.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'completed' => ['type' => 'boolean', 'example' => false],
+                                                'currentStep' => ['type' => 'integer', 'example' => 1],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/auth/onboarding/complete' => [
+                    'post' => [
+                        'summary' => 'Concluir onboarding',
+                        'description' => 'Marca o onboarding como concluído para o utilizador autenticado.',
+                        'operationId' => 'completeOnboarding',
+                        'tags' => ['Onboarding'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => false,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'currentStep' => ['type' => 'integer', 'minimum' => 1, 'example' => 2],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Onboarding concluído.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Onboarding concluído.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => [
+                                'description' => 'Dados inválidos.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'O passo atual deve ser um número inteiro.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
                 '/v1/settings' => [
                     'get' => [
                         'summary' => 'Definições do utilizador',
