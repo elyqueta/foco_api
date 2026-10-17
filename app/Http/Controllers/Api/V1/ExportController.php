@@ -17,6 +17,7 @@ use Symfony\Component\HttpFoundation\Response;
  * no formato `AppData` compatível com `foco-backup.json`.
  *
  * Query `?format=pdf` devolve um PDF com logo, marca d'água e tabelas.
+ * Query `?from=YYYY-MM-DD&to=YYYY-MM-DD` filtra projetos e tarefas por prazo.
  * Cabeçalho `Content-Disposition: attachment; filename="foco-backup-YYYY-MM-DD.json|pdf"`.
  */
 class ExportController extends Controller
@@ -26,13 +27,16 @@ class ExportController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        $resource = new AppDataResource($user);
+        $from = $request->query('from');
+        $to = $request->query('to');
+
+        $resource = new AppDataResource($user, $from, $to);
         $data = $resource->resolve();
 
         $format = $request->query('format', 'json');
 
         if ($format === 'pdf') {
-            return $this->exportPdf($user, $data);
+            return $this->exportPdf($user, $data, $from, $to);
         }
 
         $filename = 'foco-backup-'.now()->format('Y-m-d').'.json';
@@ -45,21 +49,46 @@ class ExportController extends Controller
 
     /**
      * Gera o PDF de exportação com logo, marca d'água e tabelas.
-     *
-     * @return \Symfony\Component\HttpFoundation\Response
      */
-    private function exportPdf(User $user, array $data): Response
+    private function exportPdf(User $user, array $data, ?string $from, ?string $to): Response
     {
+        $logoTop = $this->svgToBase64(public_path('brands/foco-login-art.svg'));
+        $logoWatermark = $this->svgToBase64(public_path('brands/foco-logo-horizontal.svg'));
+
+        $period = '';
+        if ($from || $to) {
+            $period = 'Período: '.($from ?: 'início').' → '.($to ?: 'hoje');
+        }
+
         $pdf = Pdf::loadView('export.pdf', [
             'user' => $user,
             'projects' => collect($data['projects'] ?? []),
             'tasks' => collect($data['tasks'] ?? []),
             'projectsCount' => count($data['projects'] ?? []),
             'tasksCount' => count($data['tasks'] ?? []),
+            'logoTop' => $logoTop,
+            'logoWatermark' => $logoWatermark,
+            'period' => $period,
         ])->setPaper('a4', 'portrait');
 
-        $filename = 'foco-backup-'.now()->format('Y-m-d').'.pdf';
+        $suffix = $period ? '-'.str_replace([' ', '→', ':', ''], '', $period) : '';
+        $filename = 'foco-backup-'.now()->format('Y-m-d').$suffix.'.pdf';
 
         return $pdf->download($filename);
+    }
+
+    /**
+     * Converte um ficheiro SVG para data URI base64.
+     */
+    private function svgToBase64(string $path): ?string
+    {
+        if (! file_exists($path)) {
+            return null;
+        }
+
+        $content = file_get_contents($path);
+        $base64 = base64_encode($content);
+
+        return 'data:image/svg+xml;base64,'.$base64;
     }
 }

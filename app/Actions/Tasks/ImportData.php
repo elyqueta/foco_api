@@ -279,7 +279,7 @@ class ImportData
             } else {
                 try {
                     $due = CarbonImmutable::parse($task['dueDate']);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     $errors[] = $prefix.': prazo não é válido ("'.$task['dueDate'].'").';
                     $due = null;
                 }

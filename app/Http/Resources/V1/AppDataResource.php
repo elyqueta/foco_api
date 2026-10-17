@@ -7,6 +7,7 @@ namespace App\Http\Resources\V1;
 use App\Http\Resources\V1\Concerns\FormatsContractDates;
 use App\Models\User;
 use App\Services\TimerService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -17,11 +18,30 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *
  * Inclui `timer.trackedSeconds` por tarefa e atividade de cada projeto/tarefa.
  *
+ * Query `?from=YYYY-MM-DD&to=YYYY-MM-DD` filtra projetos e tarefas por prazo.
+ *
  * @property-read User $resource
  */
 class AppDataResource extends JsonResource
 {
     use FormatsContractDates;
+
+    /** @var string|null */
+    private $from;
+
+    /** @var string|null */
+    private $to;
+
+    /**
+     * @param  mixed  $resource
+     */
+    public function __construct($resource, ?string $from = null, ?string $to = null)
+    {
+        parent::__construct($resource);
+
+        $this->from = $from;
+        $this->to = $to;
+    }
 
     /**
      * @return array<string, mixed>
@@ -31,15 +51,25 @@ class AppDataResource extends JsonResource
         /** @var User $user */
         $user = $this->resource;
 
-        $projects = $user->projects()
-            ->with('activity')
-            ->orderBy('created_at')
-            ->get();
+        $from = $this->from ? CarbonImmutable::parse($this->from) : null;
+        $to = $this->to ? CarbonImmutable::parse($this->to)->endOfDay() : null;
 
-        $tasks = $user->tasks()
-            ->with('activity', 'activeTimeEntry')
-            ->orderBy('created_at')
-            ->get();
+        $projectsQuery = $user->projects()->with('activity')->orderBy('created_at');
+        $tasksQuery = $user->tasks()->with('activity', 'activeTimeEntry')->orderBy('created_at');
+
+        if ($from !== null || $to !== null) {
+            $projectsQuery->whereBetween('due_date', [
+                $from?->format('Y-m-d') ?? '1000-01-01',
+                $to?->format('Y-m-d') ?? '9999-12-31',
+            ]);
+            $tasksQuery->whereBetween('due_date', [
+                $from?->format('Y-m-d') ?? '1000-01-01',
+                $to?->format('Y-m-d') ?? '9999-12-31',
+            ]);
+        }
+
+        $projects = $projectsQuery->get();
+        $tasks = $tasksQuery->get();
 
         $timers = app(TimerService::class);
 

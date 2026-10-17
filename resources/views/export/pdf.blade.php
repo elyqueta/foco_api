@@ -18,14 +18,14 @@
         }
         .watermark {
             position: absolute;
-            top: 50%;
+            top: 40%;
             left: 50%;
-            transform: translate(-50%, -50%) rotate(-30deg);
-            font-size: 120px;
-            color: rgba(63, 191, 154, 0.08);
-            white-space: nowrap;
+            transform: translate(-50%, -50%) rotate(-15deg);
+            width: 600px;
+            height: auto;
             z-index: 0;
             pointer-events: none;
+            opacity: 0.10;
         }
         .header {
             position: relative;
@@ -34,36 +34,18 @@
             border-bottom: 2px solid #3FBF9A;
             padding-bottom: 10px;
         }
-        .logo {
-            width: 60px;
-            height: 60px;
-            background: #3FBF9A;
-            border-radius: 8px;
-            display: inline-block;
-            vertical-align: middle;
+        .logo-top {
+            width: 200px;
+            height: auto;
+            display: block;
+            margin-bottom: 8px;
         }
-        .logo-text {
-            display: inline-block;
-            vertical-align: middle;
-            margin-left: 12px;
-        }
-        .logo-text h1 {
-            margin: 0;
-            color: #3FBF9A;
-            font-size: 24px;
-            font-weight: bold;
-        }
-        .logo-text p {
-            margin: 2px 0 0;
-            color: #666;
-            font-size: 13px;
-        }
-        .user-info {
-            margin-top: 15px;
-            font-size: 13px;
+        .header-text {
+            margin-top: 10px;
+            font-size: 14px;
             color: #555;
         }
-        .user-info strong { color: #333; }
+        .header-text strong { color: #333; }
         .section {
             margin-top: 25px;
             position: relative;
@@ -134,20 +116,21 @@
     </style>
 </head>
 <body>
-    <div class="watermark">FOCO</div>
+    <img src="{{ $logoWatermark }}" class="watermark" alt="Marca d'água">
 
     <div class="header">
-        <span class="logo"></span>
-        <span class="logo-text">
-            <h1>Foco</h1>
-            <p>Backup de dados · {{ $user->name }}</p>
-        </span>
-    </div>
-
-    <div class="user-info">
-        <strong>Utilizador:</strong> {{ $user->name }} · <strong>Email:</strong> {{ $user->email }} ·
-        <strong>Exportado em:</strong> {{ \Carbon\CarbonImmutable::now()->format('d/m/Y H:i') }} ·
-        <strong>Versão:</strong> 1
+        @if ($logoTop)
+            <img src="{{ $logoTop }}" class="logo-top" alt="Logo Foco">
+        @endif
+        <div class="header-text">
+            <strong>Foco · {{ $user->name }}</strong><br>
+            {{ \Carbon\CarbonImmutable::now()->format('d/m/Y H:i') }} ·
+            @if ($period)
+                {{ $period }}
+            @else
+                Backup de dados do utilizador
+            @endif
+        </div>
     </div>
 
     <div class="section">

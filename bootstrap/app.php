@@ -1,8 +1,8 @@
 <?php
 
-use Barryvdh\DomPDF\ServiceProvider as DompdfServiceProvider;
 use App\Exceptions\DomainRuleException;
 use App\Http\Middleware\EnsureValidJson;
+use Barryvdh\DomPDF\ServiceProvider as DompdfServiceProvider;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
