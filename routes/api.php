@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\ApiDocumentationController;
+use App\Http\Controllers\Api\SchedulerController;
+use App\Http\Middleware\VerifyCronSecret;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
@@ -43,6 +45,20 @@ Route::get('/health', function () {
 });
 
 Route::get('/docs.json', [ApiDocumentationController::class, 'openApi']);
+
+/*
+|--------------------------------------------------------------------------
+| Agendador externo (doc 10)
+|--------------------------------------------------------------------------
+| O tick é infraestrutura, não rota de domínio: quem chama é um cron
+| externo (cron-job.org, GitHub Actions) com o segredo `X-Cron-Secret`, não
+| um utilizador com token Sanctum. Aceita GET e POST — alguns agendadores
+| só fazem um dos dois — e ambos correm exactamente o mesmo tick, protegido
+| pelo lock `foco:tick`. O throttle (6/min) limita martelar no segredo.
+*/
+Route::match(['GET', 'POST'], '/internal/scheduler/tick', [SchedulerController::class, 'tick'])
+    ->middleware([VerifyCronSecret::class, 'throttle:6,1'])
+    ->name('internal.scheduler.tick');
 
 /*
 |--------------------------------------------------------------------------

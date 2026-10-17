@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Actions\Users\ProvisionUserDefaults;
+use App\Enums\NotificationType;
 use App\Exceptions\DomainRuleException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Auth\LoginRequest;
@@ -13,6 +14,7 @@ use App\Http\Requests\V1\Auth\UpdatePasswordRequest;
 use App\Http\Requests\V1\Auth\UpdateProfileRequest;
 use App\Models\EmailChangeLog;
 use App\Models\User;
+use App\Services\NotificationDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +29,10 @@ class AuthController extends Controller
      * Hash::check de um email existente, igualando os tempos de resposta.
      */
     private const DUMMY_PASSWORD_HASH = '$2y$12$79PnjmpvP4VTS755xjFSeOei/ChpdbeOuGGCJhxsZCQcQM.J9h.Vu';
+
+    public function __construct(
+        private readonly NotificationDispatcher $dispatcher,
+    ) {}
 
     public function login(LoginRequest $request): JsonResponse
     {
@@ -94,7 +100,25 @@ class AuthController extends Controller
             return $user;
         });
 
+        // Email de boas-vindas (fora da transação para não bloquear o commit).
+        $this->sendWelcomeEmail($user);
+
         return $this->issueToken($request, $user, 201);
+    }
+
+    /**
+     * Envia o email de boas-vindas ao utilizador recém-criado.
+     */
+    private function sendWelcomeEmail(User $user): void
+    {
+        $this->dispatcher->dispatchChannels(
+            $user,
+            NotificationType::Welcome,
+            null,
+            'welcome:'.$user->id,
+            [NotificationDispatcher::CHANNEL_EMAIL],
+            ['name' => $user->name],
+        );
     }
 
     public function logout(Request $request): JsonResponse

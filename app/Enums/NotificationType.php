@@ -17,6 +17,7 @@ enum NotificationType: string
     case ProjectOverdue = 'project_overdue';
     case ProjectReadyToComplete = 'project_ready_to_complete';
     case TaskOverduePostponed = 'task_overdue_postponed';
+    case Welcome = 'welcome';
 
     public function label(): string
     {
@@ -32,6 +33,7 @@ enum NotificationType: string
             self::ProjectOverdue => 'Projeto atrasado',
             self::ProjectReadyToComplete => 'Projeto pronto',
             self::TaskOverduePostponed => 'Tarefa adiada atrasada',
+            self::Welcome => 'Bem-vindo ao Foco',
         };
     }
 
@@ -49,6 +51,7 @@ enum NotificationType: string
             self::ProjectOverdue => 'email',
             self::ProjectReadyToComplete => 'in_app',
             self::TaskOverduePostponed => 'in_app',
+            self::Welcome => 'email',
         };
     }
 

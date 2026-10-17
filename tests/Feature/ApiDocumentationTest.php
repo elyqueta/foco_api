@@ -52,8 +52,8 @@ class ApiDocumentationTest extends TestCase
                     '/health',
                 ],
                 'components' => [
-                    'securitySchemes' => ['bearerAuth'],
-                    'schemas' => ['Project', 'ProjectInput', 'Task', 'TaskInput', 'ActivityEntry', 'TimeEntry', 'TimeSummary', 'Notification'],
+                    'securitySchemes' => ['bearerAuth', 'cronSecret'],
+                    'schemas' => ['Project', 'ProjectInput', 'Task', 'TaskInput', 'ActivityEntry', 'TimeEntry', 'TimeSummary', 'Notification', 'TickSummary'],
                 ],
             ])
             ->assertJsonPath('openapi', '3.0.3')
@@ -96,7 +96,14 @@ class ApiDocumentationTest extends TestCase
             ->assertJsonPath('paths./v1/notifications.delete.responses.200.content.application/json.schema.properties.message.example', 'Notificações removidas.')
             ->assertJsonPath('components.schemas.Notification.properties.type.enum.3', 'task_completed')
             ->assertJsonPath('components.schemas.Notification.properties.data.properties.projectId.format', 'uuid')
-            ->assertJsonPath('components.schemas.TimeEntry.properties.endedReason.enum.1', 'auto_pause');
+            ->assertJsonPath('components.schemas.TimeEntry.properties.endedReason.enum.1', 'auto_pause')
+            ->assertJsonPath('paths./internal/scheduler/tick.post.security.0.cronSecret', [])
+            ->assertJsonPath('paths./internal/scheduler/tick.post.parameters.0.name', 'X-Cron-Secret')
+            ->assertJsonPath('paths./internal/scheduler/tick.get.summary', 'Correr o tick do scheduler (agendador externo)')
+            ->assertJsonPath('paths./internal/scheduler/tick.post.responses.401.description', 'Segredo em falta ou errado — `{ message, code: "INVALID_CRON_SECRET" }`.')
+            ->assertJsonPath('paths./internal/scheduler/tick.post.responses.200.content.application/json.schema.$ref', '#/components/schemas/TickSummary')
+            ->assertJsonPath('components.securitySchemes.cronSecret.name', 'X-Cron-Secret')
+            ->assertJsonPath('components.schemas.TickSummary.properties.skipped.example', 1);
     }
 
     public function test_swagger_ui_is_available_at_docs(): void

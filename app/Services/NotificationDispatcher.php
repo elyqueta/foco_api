@@ -102,7 +102,8 @@ class NotificationDispatcher
 
     /**
      * Despacha apenas nos canais indicados (usado pelo tick da Fase 10 para
-     * aplicar o teto diário de emails e a agregação anti-spam).
+     * aplicar o teto diário de emails e a agregação anti-spam). `$skipReason`
+     * regista todos esses canais como `skipped` sem enviar.
      *
      * @param  list<string>  $channels
      * @param  array<string, mixed>  $context
@@ -114,11 +115,12 @@ class NotificationDispatcher
         string $dedupeKey,
         array $channels,
         array $context = [],
+        ?string $skipReason = null,
     ): bool {
         $sent = false;
 
         foreach ($channels as $channel) {
-            if ($this->dispatchChannel($user, $type, $subject, $dedupeKey, $channel, $context)) {
+            if ($this->dispatchChannel($user, $type, $subject, $dedupeKey, $channel, $context, $skipReason)) {
                 $sent = true;
             }
         }
@@ -173,6 +175,22 @@ class NotificationDispatcher
     }
 
     /**
+     * O evento já foi entregue em algum canal? Usado pelo tick para marcar
+     * `projects.overdue_notified_at` só depois de a notificação existir
+     * (in-app ou email) — assim uma falha de envio tenta novamente no tick
+     * seguinte em vez de marcar o projeto como avisado.
+     */
+    public function wasDelivered(User $user, NotificationType $type, ?Model $subject, string $dedupeKey): bool
+    {
+        return $this->find($user, $type, self::CHANNEL_IN_APP, $subject, $dedupeKey)
+            ->where('status', self::STATUS_SENT)
+            ->exists()
+            || $this->find($user, $type, self::CHANNEL_EMAIL, $subject, $dedupeKey)
+                ->where('status', self::STATUS_SENT)
+                ->exists();
+    }
+
+    /**
      * Emails já enviados ao utilizador no dia UTC (teto diário da Fase 10:
      * `MAIL_DAILY_LIMIT`, contado no log onde `channel=email` e
      * `status=sent`).
@@ -214,10 +232,7 @@ class NotificationDispatcher
                     return false;
                 }
 
-                $notification = new FocoNotification(
-                    $type,
-                    $this->messages->make($user, $type, $subject, $context),
-                );
+                $notification = $this->notification($user, $type, $subject, $context);
 
                 $this->notifier->sendNow(
                     $user,
@@ -238,8 +253,9 @@ class NotificationDispatcher
     }
 
     /**
-     * Canal email (Resend) — chega na Fase 10. Sem `toMail` o canal ainda
-     * não existe: nada é enviado nem registado.
+     * Canal email (doc 10, Resend): mesma forma do in-app — a linha do log
+     * é reclamada na mesma transação do envio, para que uma falha não deixe
+     * o canal marcado como enviado e um retry não duplique a mensagem.
      *
      * @param  array<string, mixed>  $context
      */
@@ -251,26 +267,25 @@ class NotificationDispatcher
         array $context,
         ?string $skipReason,
     ): bool {
-        $notification = new FocoNotification(
-            $type,
-            $this->messages->make($user, $type, $subject, $context),
-        );
-
-        if (! $notification->supportsMail()) {
-            return false;
-        }
-
         if ($skipReason !== null) {
             return $this->recordSkipped($user, $type, self::CHANNEL_EMAIL, $subject, $dedupeKey, $skipReason);
         }
 
+        // Sem representação em email nada é enviado nem registado (hoje todos
+        // os tipos a têm; a rede fica para tipos futuros sem `toMail`).
+        if (! (new FocoNotification($type, []))->supportsMail()) {
+            return false;
+        }
+
         try {
-            return DB::transaction(function () use ($user, $type, $subject, $dedupeKey, $notification): bool {
+            return DB::transaction(function () use ($user, $type, $subject, $dedupeKey, $context): bool {
                 $log = $this->claim($user, $type, self::CHANNEL_EMAIL, $subject, $dedupeKey);
 
                 if (! $log instanceof NotificationDispatchLog) {
                     return false;
                 }
+
+                $notification = $this->notification($user, $type, $subject, $context);
 
                 $this->notifier->sendNow(
                     $user,
@@ -288,6 +303,27 @@ class NotificationDispatcher
 
             return false;
         }
+    }
+
+    /**
+     * Notificação pronta a enviar: o conteúdo vem do `Messages` (fonte única
+     * dos textos PT) e o assunto/contexto viajam com a notificação para o
+     * canal email sem serem gravados em `notifications.data`.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function notification(
+        User $user,
+        NotificationType $type,
+        ?Model $subject,
+        array $context,
+    ): FocoNotification {
+        return new FocoNotification(
+            $type,
+            $this->messages->make($user, $type, $subject, $context),
+            $subject,
+            $context,
+        );
     }
 
     /**
@@ -340,6 +376,15 @@ class NotificationDispatcher
         ?Model $subject,
         string $dedupeKey,
     ): void {
+        // Disparos **sem assunto** (digest diário, email agregado) não são
+        // protegidos pelo índice único: PostgreSQL e SQLite tratam NULLs
+        // como distintos. Sem esta guarda cada tick acumularia uma linha
+        // nova para a mesma chave. Estes disparos só acontecem dentro do
+        // tick, serializado pelo lock `foco:tick`.
+        if ($subject === null && $this->find($user, $type, $channel, $subject, $dedupeKey)->exists()) {
+            return;
+        }
+
         DB::table('notification_dispatch_log')->insertOrIgnore([
             'user_id' => $user->id,
             'type' => $type->value,

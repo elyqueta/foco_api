@@ -10,12 +10,57 @@ class ApiDocumentationController
 {
     public function openApi(): JsonResponse
     {
+        // Operações do tick: o agendador externo pode chamar por GET ou POST
+        // (alguns serviços só permitem um dos dois) e ambas correm o mesmo
+        // tick — daí um único array reutilizado pelos dois métodos.
+        $tickOperation = [
+            'summary' => 'Correr o tick do scheduler (agendador externo)',
+            'description' => 'Trabalho único do scheduler: expira tarefas com prazo vencido (notificação `task_expired`), faz a higiene dos timers (> 16 h fechadas com `auto_pause`, aviso de timers longos e de estimativa ultrapassada), envia os **lembretes de prazo** (`task_due_soon`, `task_due_imminent`, `project_due_soon`, `project_overdue`, `task_overdue_postponed`) na hora local de cada utilizador e o **digest diário** entre `digest_hour` e `digest_hour + 6h`. Acaba com a limpeza diária (tokens Sanctum expirados e notificações antigas). **Idempotente:** repetir não duplica notificações (dedupe em `notification_dispatch_log`) e um tick a correr impede outro (lock `foco:tick`, respondido com `202 { ok, skipped: "locked" }`). **Nunca levanta excepção:** cada passo falha sozinho e conta em `failed`. **Orçamento de tempo:** passados ~25 s (`TICK_TIME_BUDGET`) deixa de processar novos itens e devolve `timeBudgetExceeded: true` — o restante corre no tick seguinte. Chamar por GET ou POST tem o mesmo efeito; sem `X-Cron-Secret` não há tick.',
+            'parameters' => [
+                [
+                    'name' => 'X-Cron-Secret',
+                    'in' => 'header',
+                    'required' => true,
+                    'description' => 'Segredo do `CRON_SECRET` no servidor (comparado com `hash_equals`). Sem segredo configurado o servidor responde `503 CRON_NOT_CONFIGURED` — nunca aceita um tick sem segredo.',
+                    'schema' => ['type' => 'string'],
+                ],
+            ],
+            'security' => [['cronSecret' => []]],
+            'responses' => [
+                '200' => [
+                    'description' => 'Tick corrido com o resumo do trabalho feito.',
+                    'content' => [
+                        'application/json' => [
+                            'schema' => ['$ref' => '#/components/schemas/TickSummary'],
+                        ],
+                    ],
+                ],
+                '202' => [
+                    'description' => 'Já havia um tick a correr — nada foi feito.',
+                    'content' => [
+                        'application/json' => [
+                            'schema' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'ok' => ['type' => 'boolean', 'example' => true],
+                                    'skipped' => ['type' => 'string', 'example' => 'locked'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '401' => ['description' => 'Segredo em falta ou errado — `{ message, code: "INVALID_CRON_SECRET" }`.'],
+                '429' => ['description' => 'Demasiadas chamadas ao tick (máximo 6 por minuto).'],
+                '503' => ['description' => 'Servidor sem `CRON_SECRET` configurado — `{ message, code: "CRON_NOT_CONFIGURED" }`.'],
+            ],
+        ];
+
         $spec = [
             'openapi' => '3.0.3',
             'info' => [
                 'title' => config('app.name', 'Foco API').' — v1',
                 'version' => trim(file_get_contents(base_path('VERSION'))),
-                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `409 TIMER_ALREADY_RUNNING` (o timer desta tarefa já está a correr — devolve a `task`), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, `TIMER_WRONG_STATE`, `TIMER_NOT_ALLOWED`, `TIMER_NOT_RUNNING`, `INVALID_TRANSITION`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). **Timer:** só pode existir um timer a correr por utilizador; iniciar/retomar outra tarefa pausa a actual automaticamente (`auto_pause`, devolvida em `pausedTask`). **Notificações in-app:** criadas pelo servidor nos eventos (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`) com dedupe por evento em `notification_dispatch_log`; `GET /notifications` lista, `?unread=1` filtra e `GET /notifications/unread-count` dá o badge. Lembretes de prazo e digest diário chegam com o scheduler. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação e o tick do scheduler) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`; no tick do scheduler `INVALID_CRON_SECRET` com `503 CRON_NOT_CONFIGURED` quando o servidor não tem `CRON_SECRET`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `409 TIMER_ALREADY_RUNNING` (o timer desta tarefa já está a correr — devolve a `task`), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, `TIMER_WRONG_STATE`, `TIMER_NOT_ALLOWED`, `TIMER_NOT_RUNNING`, `INVALID_TRANSITION`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). **Timer:** só pode existir um timer a correr por utilizador; iniciar/retomar outra tarefa pausa a actual automaticamente (`auto_pause`, devolvida em `pausedTask`). **Notificações:** criadas pelo servidor nos eventos (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`) e pelo scheduler nos lembretes de prazo e digest diário; cada evento é enviado uma única vez por canal (dedupe em `notification_dispatch_log`, com teto diário de emails e agregação anti-spam). `GET /notifications` lista, `?unread=1` filtra e `GET /notifications/unread-count` dá o badge. **Scheduler:** o trabalho do servidor (expiração, higiene dos timers, lembretes, digest e limpeza) corre no tick `POST`/`GET /internal/scheduler/tick`, chamado por um agendador externo com `X-Cron-Secret` — sem worker nem Cron Job. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
             ],
             'servers' => [
                 ['url' => '/api', 'description' => 'Base da API: rotas de domínio em /api/v1/*, sistema em /api/*'],
@@ -1508,12 +1553,22 @@ class ApiDocumentationController
                         ],
                     ],
                 ],
+                '/internal/scheduler/tick' => [
+                    'post' => $tickOperation,
+                    'get' => $tickOperation,
+                ],
             ],
             'components' => [
                 'securitySchemes' => [
                     'bearerAuth' => [
                         'type' => 'http',
                         'scheme' => 'bearer',
+                    ],
+                    'cronSecret' => [
+                        'type' => 'apiKey',
+                        'in' => 'header',
+                        'name' => 'X-Cron-Secret',
+                        'description' => 'Segredo do agendador externo (`CRON_SECRET` no servidor). Só no endpoint do tick.',
                     ],
                 ],
                 'schemas' => [
@@ -1664,7 +1719,7 @@ class ApiDocumentationController
                     ],
                     'Notification' => [
                         'type' => 'object',
-                        'description' => 'Notificação in-app (`notifications`). Criada pelo servidor nos eventos do utilizador (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`; lembretes e digest diário chegam com o scheduler). Cada evento é enviado uma única vez por canal (dedupe em `notification_dispatch_log`) e respeita as preferências de notificação do utilizador.',
+                        'description' => 'Notificação in-app (`notifications`). Criada pelo servidor nos eventos do utilizador (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`) e pelo scheduler nos lembretes de prazo (`task_due_soon`, `task_due_imminent`, `project_due_soon`, `project_overdue`, `task_overdue_postponed`) e no digest diário (`daily_digest`). Cada evento é enviado uma única vez por canal — dedupe em `notification_dispatch_log`, com teto diário de emails (`MAIL_DAILY_LIMIT`) e agregação anti-spam (> 5 emails no mesmo tick viram um só) — e respeita as preferências de notificação do utilizador. Os mesmos eventos vão por email quando o canal está activo (Resend), com assunto `[Foco] …` e link para o front.',
                         'properties' => [
                             'id' => ['type' => 'string', 'format' => 'uuid'],
                             'type' => [
@@ -1683,6 +1738,26 @@ class ApiDocumentationController
                             ],
                             'readAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
                             'createdAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                        ],
+                    ],
+                    'TickSummary' => [
+                        'type' => 'object',
+                        'description' => 'Resumo de um tick do scheduler (`POST`/`GET /internal/scheduler/tick`). Contagens lidas do `notification_dispatch_log` no próprio tick; `failed` inclui os passos que falharam isoladamente (o tick nunca levanta excepção).',
+                        'properties' => [
+                            'ok' => ['type' => 'boolean', 'example' => true],
+                            'durationMs' => ['type' => 'integer', 'example' => 1830],
+                            'expired' => ['type' => 'integer', 'example' => 2, 'description' => 'Tarefas que passaram a `expired` neste tick.'],
+                            'sent' => [
+                                'type' => 'object',
+                                'description' => 'Envios entregues no tick, por canal.',
+                                'properties' => [
+                                    'in_app' => ['type' => 'integer', 'example' => 3],
+                                    'email' => ['type' => 'integer', 'example' => 2],
+                                ],
+                            ],
+                            'skipped' => ['type' => 'integer', 'example' => 1, 'description' => 'Emails não enviados de propósito (teto diário `MAIL_DAILY_LIMIT` ou agregação anti-spam > 5 emails no mesmo tick).'],
+                            'failed' => ['type' => 'integer', 'example' => 0, 'description' => 'Envios falhados + passos que falharam (são retentados até 3 vezes).'],
+                            'timeBudgetExceeded' => ['type' => 'boolean', 'example' => false, 'description' => 'O tick parou por orçamento de tempo (`TICK_TIME_BUDGET`) — o restante corre no tick seguinte.'],
                         ],
                     ],
                 ],

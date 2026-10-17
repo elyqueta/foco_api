@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Notifications;
 
 use App\Enums\NotificationType;
-use Illuminate\Notifications\Messages\MailMessage;
+use App\Mail\FocoMail;
+use App\Models\Project;
+use App\Models\Task;
+use Illuminate\Contracts\Mail\Mailable as MailableContract;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Notifications\Notification;
 
 /**
- * Notificação in-app do Foco (doc 09 §"Arquitetura"): carrega o tipo e o
- * conteúdo PT já construído por `Messages` e grava-se na tabela
+ * Notificação do Foco (doc 09 §"Arquitetura" + doc 10 §"Emails"): carrega o
+ * tipo e o conteúdo PT já construído por `Messages` e grava-se na tabela
  * `notifications` do Laravel pelo canal `database`.
  *
  * O `type` guardado é o valor do enum (`task_completed`, …) e não o nome da
@@ -19,8 +23,12 @@ use Illuminate\Notifications\Notification;
  * isso `via()` só define o que usar quando a notificação é enviada sem essa
  * indicação.
  *
- * O canal `email` (Resend) chega na Fase 10: até lá `supportsMail()` é
- * `false` e o dispatcher não tenta esse canal.
+ * O canal `email` (doc 10, Resend) devolve o mailable `FocoMail`: mesmo
+ * conteúdo PT, assunto com prefixo `[Foco]`, botão para o front e rodapé com
+ * o link das definições. O assunto e os extras (secções do digest) viajam no
+ * construtor porque `notifications.data` tem de ficar plano
+ * (`{ title, body, taskId? | projectId? }`) — o que só importa ao email não
+ * é gravado na base de dados.
  */
 class FocoNotification extends Notification
 {
@@ -31,10 +39,13 @@ class FocoNotification extends Notification
 
     /**
      * @param  array{title: string, body: string, taskId?: string, projectId?: string}  $content
+     * @param  array<string, mixed>  $context  extras do disparo (ex. `sections`, `minutes`)
      */
     public function __construct(
         public readonly NotificationType $type,
         public readonly array $content,
+        private readonly ?Model $subject = null,
+        private readonly array $context = [],
     ) {}
 
     /**
@@ -77,15 +88,39 @@ class FocoNotification extends Notification
     }
 
     /**
-     * Ainda não há envio de email nesta fase (Fase 10 implementa `toMail`).
+     * Todos os tipos têm representação em email (doc 10): quem decide se o
+     * canal email entra são as preferências do utilizador, resolvidas pelo
+     * dispatcher.
      */
     public function supportsMail(): bool
     {
-        return false;
+        return true;
     }
 
-    public function toMail(mixed $notifiable): ?MailMessage
+    /**
+     * Email (doc 10). O canal `mail` do Laravel chama `toMail` com o
+     * notificável e espera que o mailable traga o destinatário — por isso o
+     * `->to()` é feito aqui (o `FocoMail` não conhece o utilizador).
+     */
+    public function toMail(mixed $notifiable): MailableContract
     {
-        return null;
+        $mail = new FocoMail($this->type, $this->content, $this->subject, $this->context);
+
+        $email = is_object($notifiable) ? ($notifiable->email ?? null) : null;
+
+        return is_string($email) && $email !== '' ? $mail->to($email) : $mail;
+    }
+
+    /**
+     * Nome do assunto usado nos assuntos dos emails (título da tarefa, nome
+     * do projeto).
+     */
+    public function subjectName(): string
+    {
+        return match (true) {
+            $this->subject instanceof Task => (string) $this->subject->title,
+            $this->subject instanceof Project => (string) $this->subject->name,
+            default => '',
+        };
     }
 }

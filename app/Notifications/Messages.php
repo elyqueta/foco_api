@@ -40,19 +40,37 @@ class Messages
      * @param  array<string, mixed>  $context  extras do disparo (ex.
      *                                         `trackedSeconds`,
      *                                         `estimateMinutes`,
-     *                                         `minutes`, `summary`)
+     *                                         `minutes`, `summary`,
+     *                                         `sections`, `title`)
      * @return array{title: string, body: string, taskId?: string, projectId?: string}
      */
     public function make(User $user, NotificationType $type, ?Model $subject, array $context = []): array
     {
         return [
-            'title' => $this->title($type),
+            'title' => $this->title($type, $context),
             'body' => $this->body($user, $type, $subject, $context),
             ...$this->data($subject),
         ];
     }
 
-    private function title(NotificationType $type): string
+    /**
+     * Título do tipo. Um `title` no contexto sobrepõe o do tipo — usado pelo
+     * email agregado do tick (doc 10), que tem de se distinguir do digest.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function title(NotificationType $type, array $context): string
+    {
+        $override = $context['title'] ?? null;
+
+        if (is_string($override) && trim($override) !== '') {
+            return trim($override);
+        }
+
+        return $this->typeTitle($type);
+    }
+
+    private function typeTitle(NotificationType $type): string
     {
         return match ($type) {
             NotificationType::DailyDigest => 'O teu dia',
@@ -66,6 +84,7 @@ class Messages
             NotificationType::ProjectOverdue => 'Projeto atrasado',
             NotificationType::ProjectReadyToComplete => 'Projeto pronto a concluir',
             NotificationType::TaskOverduePostponed => 'Tarefa adiada em atraso',
+            NotificationType::Welcome => 'Bem-vindo ao Foco',
         };
     }
 
@@ -86,6 +105,7 @@ class Messages
             NotificationType::ProjectOverdue => $this->projectOverdue($subject, $context),
             NotificationType::ProjectReadyToComplete => $this->projectReadyToComplete($subject),
             NotificationType::TaskOverduePostponed => $this->taskOverduePostponed($subject),
+            NotificationType::Welcome => $this->welcome($context),
         };
     }
 
@@ -331,5 +351,21 @@ class Messages
         return is_int($value) || (is_string($value) && ctype_digit($value))
             ? (int) $value
             : null;
+    }
+
+    /**
+     * "Bem-vindo ao Foco, {nome}. Aqui tens o teu espaço de foco."
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function welcome(array $context): string
+    {
+        $name = $context['name'] ?? '';
+
+        if ($name !== '') {
+            return "Bem-vindo ao Foco, {$name}. Aqui tens o teu espaço de foco para organizar tarefas e projetos.";
+        }
+
+        return 'Bem-vindo ao Foco. Aqui tens o teu espaço de foco para organizar tarefas e projetos.';
     }
 }

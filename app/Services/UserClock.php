@@ -44,6 +44,22 @@ class UserClock
     }
 
     /**
+     * Data + hora opcional (hora local do utilizador) como Carbon **no fuso
+     * do utilizador** — usado pelos lembretes do tick, que precisam de
+     * comparar instantes locais sem depender da relação `user` de cada modelo.
+     */
+    public function toLocal(string $date, ?string $time, User $user): CarbonImmutable
+    {
+        $tz = $this->timezone($user);
+
+        if ($time === null || $time === '') {
+            return CarbonImmutable::parse($date, $tz)->startOfDay();
+        }
+
+        return CarbonImmutable::parse("{$date} {$time}", $tz);
+    }
+
+    /**
      * Fuso do utilizador (default UTC, com validação do identificador).
      */
     public function timezone(User $user): string
