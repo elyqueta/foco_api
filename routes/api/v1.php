@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Categories\CategoryController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DataController;
+use App\Http\Controllers\Api\V1\Exports\ProductivityReportController;
 use App\Http\Controllers\Api\V1\ExportController;
 use App\Http\Controllers\Api\V1\ImportController;
 use App\Http\Controllers\Api\V1\ImportPromptController;
@@ -87,6 +88,7 @@ Route::prefix('v1')->group(function (): void {
         // Dashboard, export, import, dados e pesquisa (Fase 11).
         Route::get('/dashboard', [DashboardController::class, '__invoke']);
         Route::get('/export', [ExportController::class, '__invoke']);
+        Route::get('/exports/productivity-report', [ProductivityReportController::class, '__invoke']);
         Route::post('/import', [ImportController::class, '__invoke']);
         Route::get('/import/prompt', [ImportPromptController::class, '__invoke']);
         Route::delete('/data', [DataController::class, 'destroy']);
