@@ -85,7 +85,7 @@
    - [x] 10.10 Testes: `DailyDigestTest.php` (10), `NotificationMailTest.php` (10), `RemindersTest.php` (15), `SchedulerTickTest.php` (10)
 - [x] **Fase 11** — Import/export/dashboard/dados (`docs/11-import-export-dashboard.md`)
    - [x] 11.1 `DashboardController` + `DashboardQuery` + rota `GET /api/v1/dashboard`
-   - [x] 11.2 `ExportController` + `AppDataResource` + rota `GET /api/v1/export` (JSON + PDF premium via `?format=pdf` com `barryvdh/laravel-dompdf`, filtro de prazo `?from=&to=`, logos `public/brands/`, relatório de produtividade com cartões visuais e métricas de resumo)
+   - [x] 11.2 `ExportController` + `AppDataResource` + rota `GET /api/v1/export` (apenas JSON, sem exportação PDF)
    - [x] 11.3 `ImportController`, `ImportRequest`, `ImportData` action + rota `POST /api/v1/import`
    - [x] 11.4 `ImportPromptController` + rota `GET /api/v1/import/prompt`
    - [x] 11.5 `DataController` + rotas `DELETE /api/v1/data`, `POST /api/v1/data/seed-demo`, `POST /api/v1/data/reset-demo` (todos retornam mensagem de sucesso/erro)
