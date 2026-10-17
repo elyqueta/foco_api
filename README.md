@@ -163,6 +163,37 @@ docker compose --profile local-db run --rm --no-deps \
 > (a imagem copia o código no build). Os comandos `run` acima montam a directoria do projecto,
 > por isso correm sempre o código actual.
 
+## Reset da base de dados sem perder alterações de código
+
+Se precisar resetar a BD (ex. `down -v`) mas quiser manter as alterações de código
+que já fez no host, siga esta ordem:
+
+```sh
+# 1) Parar e remover containers + volumes da BD (apaga todos os dados da BD)
+docker compose --profile local-db down -v
+
+# 2) Subir novamente (volumes vazios, BD sem dados)
+docker compose --profile local-db up -d
+
+# 3) Executar migrations para recriar o esquema vazio
+docker compose --profile local-db exec app php artisan migrate --force
+
+# 4) Se também alterou código no host e quer que o container use a versão nova:
+docker compose --profile local-db up -d --build app
+
+# 5) (Opcional) Popular com dados demo
+# docker compose --profile local-db exec app php artisan migrate:fresh --seed
+```
+
+**Nota:** `down -v` apaga o volume `pgdata` (todos os dados da BD). Após subir
+novamente, a BD começa vazia — as migrations recriam as tabelas, mas sem registos.
+
+Se também alterou código no host e quer que o container use a versão nova, é preciso
+`up -d --build` (a imagem copia o código no build). Sem `--build`, o `up -d`
+reutiliza a imagem existente e não inclui alterações feitas no host após o último
+build. Como alternativa, pode copiar ficheiros manualmente com `docker cp`, limpar
+caches (`config:clear`, `view:clear`, `route:clear`) e reiniciar (`restart app`).
+
 ## Stack
 
 - Laravel 13, Sanctum, PostgreSQL (Neon)
