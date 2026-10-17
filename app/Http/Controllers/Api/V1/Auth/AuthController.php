@@ -107,7 +107,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Envia o email de boas-vindas ao utilizador recém-criado.
+     * Envia o email de boas-vindas e a notificação in-app ao utilizador recém-criado.
      */
     private function sendWelcomeEmail(User $user): void
     {
@@ -116,7 +116,7 @@ class AuthController extends Controller
             NotificationType::Welcome,
             null,
             'welcome:'.$user->id,
-            [NotificationDispatcher::CHANNEL_EMAIL],
+            [NotificationDispatcher::CHANNEL_EMAIL, NotificationDispatcher::CHANNEL_IN_APP],
             ['name' => $user->name],
         );
     }

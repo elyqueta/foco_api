@@ -62,6 +62,7 @@ class NotificationPreference extends Model
             'project_overdue' => ['email' => true, 'inApp' => true],
             'project_ready_to_complete' => ['email' => false, 'inApp' => true],
             'task_overdue_postponed' => ['email' => false, 'inApp' => true],
+            'welcome' => ['email' => true, 'inApp' => true],
         ];
     }
 
