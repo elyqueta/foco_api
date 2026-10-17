@@ -1856,6 +1856,54 @@ class ApiDocumentationController
                                 ],
                             ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
+                            ],
+                        ],
+                    ],
+                '/v1/exports/productivity-report' => [
+                    'get' => [
+                        'summary' => 'Relatório de produtividade',
+                        'description' => 'Devolve todos os dados do relatório de produtividade do utilizador autenticado para o intervalo de tempo pedido. O back-end não gera PDF; o front desenha o documento. Utilizado pelo Relatório de Produtividade do front (Angular).',
+                        'operationId' => 'getProductivityReport',
+                        'tags' => ['Exportações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'period',
+                                'in' => 'query',
+                                'required' => true,
+                                'schema' => ['type' => 'string', 'enum' => ['today', 'this_week', 'last_week', 'this_month', 'last_month', 'custom']],
+                                'description' => 'Período do relatório.',
+                            ],
+                            [
+                                'name' => 'start_date',
+                                'in' => 'query',
+                                'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$', 'example' => '2026-10-01'],
+                                'description' => 'Data de início (YYYY-MM-DD). Obrigatória quando period=custom.',
+                            ],
+                            [
+                                'name' => 'end_date',
+                                'in' => 'query',
+                                'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$', 'example' => '2026-10-31'],
+                                'description' => 'Data de fim (YYYY-MM-DD). Obrigatória quando period=custom.',
+                            ],
+                            [
+                                'name' => 'month',
+                                'in' => 'query',
+                                'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}$', 'example' => '2026-10'],
+                                'description' => 'Mês específico (YYYY-MM).',
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Relatório de produtividade.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/ProductivityReport'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Erro de validação (período obrigatório, datas inválidas, etc.).'],
                         ],
                     ],
                 ],
@@ -2219,6 +2267,87 @@ class ApiDocumentationController
                                         'estimateMinutes' => ['type' => 'integer', 'nullable' => true],
                                         'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
                                         'description' => ['type' => 'string'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'ProductivityReport' => [
+                        'type' => 'object',
+                        'description' => 'Relatório de produtividade do utilizador para o intervalo de tempo pedido.',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'report' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'title' => ['type' => 'string', 'example' => 'Relatório de Produtividade'],
+                                            'period' => [
+                                                'type' => 'object',
+                                                'properties' => [
+                                                    'type' => ['type' => 'string', 'example' => 'this_month'],
+                                                    'label' => ['type' => 'string', 'example' => 'Outubro de 2026'],
+                                                    'start_date' => ['type' => 'string', 'example' => '2026-10-01'],
+                                                    'end_date' => ['type' => 'string', 'example' => '2026-10-31'],
+                                                ],
+                                            ],
+                                            'generated_at' => ['type' => 'string', 'format' => 'date-time', 'example' => '2026-10-17T19:51:31+01:00'],
+                                            'timezone' => ['type' => 'string', 'example' => 'Africa/Luanda'],
+                                        ],
+                                    ],
+                                    'user' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'example' => 'Zua'],
+                                        ],
+                                    ],
+                                    'summary' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'projects_total' => ['type' => 'integer', 'example' => 3],
+                                            'projects_active' => ['type' => 'integer', 'example' => 2],
+                                            'tasks_total' => ['type' => 'integer', 'example' => 4],
+                                            'tasks_completed' => ['type' => 'integer', 'example' => 2],
+                                            'tasks_pending' => ['type' => 'integer', 'example' => 2],
+                                            'tasks_overdue' => ['type' => 'integer', 'example' => 1],
+                                            'tasks_due_today' => ['type' => 'integer', 'example' => 2],
+                                            'completion_rate' => ['type' => 'integer', 'example' => 50],
+                                        ],
+                                    ],
+                                    'projects' => [
+                                        'type' => 'array',
+                                        'items' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                'name' => ['type' => 'string'],
+                                                'description' => ['type' => 'string'],
+                                                'category' => ['type' => 'string', 'enum' => ['personal', 'professional', 'household']],
+                                                'status' => ['type' => 'string', 'enum' => ['active', 'paused', 'done']],
+                                                'deadline' => ['type' => 'string', 'nullable' => true],
+                                                'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                                                'progress' => ['type' => 'integer', 'example' => 50],
+                                                'next_step' => ['type' => 'string', 'nullable' => true],
+                                            ],
+                                        ],
+                                    ],
+                                    'tasks' => [
+                                        'type' => 'array',
+                                        'items' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                'title' => ['type' => 'string'],
+                                                'category' => ['type' => 'string', 'enum' => ['personal', 'professional', 'household']],
+                                                'priority' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                                                'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired']],
+                                                'due_date' => ['type' => 'string', 'nullable' => true],
+                                                'due_label' => ['type' => 'string', 'enum' => ['today', 'overdue', 'upcoming', 'none']],
+                                                'estimated_minutes' => ['type' => 'integer', 'nullable' => true],
+                                                'project_id' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true],
+                                            ],
+                                        ],
                                     ],
                                 ],
                             ],
