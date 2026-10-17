@@ -108,7 +108,7 @@ class EnumsTest extends TestCase
             'daily_digest', 'task_due_soon', 'task_due_imminent', 'task_expired',
             'task_completed', 'task_estimate_exceeded', 'timer_running_long',
             'project_due_soon', 'project_overdue', 'project_ready_to_complete',
-            'task_overdue_postponed',
+            'task_overdue_postponed', 'welcome',
         ];
 
         $actual = array_map(fn ($c) => $c->value, NotificationType::cases());
@@ -117,5 +117,6 @@ class EnumsTest extends TestCase
         $this->assertSame('email', NotificationType::DailyDigest->defaultChannel());
         $this->assertSame('in_app', NotificationType::TaskExpired->defaultChannel());
         $this->assertSame('email', NotificationType::TaskDueSoon->defaultChannel());
+        $this->assertSame('email', NotificationType::Welcome->defaultChannel());
     }
 }

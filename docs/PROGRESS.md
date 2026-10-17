@@ -72,8 +72,24 @@
    - [x] 9.4 `NotificationController` + 6 rotas (`list`, `unread-count`, `read`, `read-all`, `delete`, `clear`); `PATCH /api/settings` com `notifications` já vinha da Fase 4
    - [x] 9.5 Disparos: `task_completed` (com tempo registado e com `project_ready_to_complete` quando o projeto fica todo concluído), `task_expired` (em `ExpireOverdueTasks`, uma vez por dia), `task_estimate_exceeded` (ao pausar e ao concluir, partilhado por `NotifyEstimateExceeded`) e `timer_running_long` (o `NotifyLongTimers` da Fase 8 passou a usar o dispatcher, com a mesma mensagem e a mesma chave `timerlong:{id}`)
    - [x] 9.6 `foco:prune-notifications` (lidas > 30 dias; todas > 90 dias), agendado diariamente em `routes/console.php`
-- [ ] **Fase 10** — Emails, lembretes, digest, tick (`docs/10-emails-e-scheduler.md`)
-- [ ] **Fase 11** — Import/export/dashboard/dados (`docs/11-import-export-dashboard.md`)
+- [x] **Fase 10** — Emails, lembretes, digest, tick (`docs/10-emails-e-scheduler.md`)
+   - [x] 10.1 `NotificationType::Welcome` + texto PT em `Messages` + view `mail.welcome` + envio no `AuthController::register()` (email + in-app)
+   - [x] 10.2 `NotificationPreference::defaultTypes()` inclui `welcome` (email + in-app ativos por defeito)
+   - [x] 10.3 `NotificationDispatcher::dispatchChannels()`/`dispatchChannel()` aceitam `?string $skipReason`; `sendInApp()`/`sendEmail()` registam canais saltos; adicionados `wasDelivered()` e helper `notification()`
+   - [x] 10.4 `MailGate`: teto diário (`MAIL_DAILY_LIMIT`), agregação anti-spam (`AGGREGATE_AFTER=5`), motivos `daily_limit`/`batched`
+   - [x] 10.5 `SendDailyDigests`: digest diário com janela 08:00–13:00 local, secções (Para hoje, Atrasadas, Críticas/altas, Expiradas ontem, Tempo registado ontem), dedupe `digest:{data}`
+   - [x] 10.6 `SendReminders`: lembretes de prazo (task_due_soon, task_due_imminent, project_due_soon, project_overdue, task_overdue_postponed) com `wasDelivered` para marcar `overdue_notified_at`
+   - [x] 10.7 `TickService` + `FocoTick` + `SchedulerController` + `VerifyCronSecret` middleware: endpoint `/api/internal/scheduler/tick` com `X-Cron-Secret`, lock, orçamento de tempo
+   - [x] 10.8 `FocoMail` + views `mail.daily-digest`, `mail.generic`, `mail.welcome`, partials `notification`/`subcopy`: assunto `[Foco]`, botão "Abrir no Foco", rodapé com link Definições
+   - [x] 10.9 `config/services.php`: `frontend.url`, `cron.secret`, `scheduler.{time_budget, mail_daily_limit}`
+   - [x] 10.10 Testes: `DailyDigestTest.php` (10), `NotificationMailTest.php` (10), `RemindersTest.php` (15), `SchedulerTickTest.php` (10)
+- [x] **Fase 11** — Import/export/dashboard/dados (`docs/11-import-export-dashboard.md`)
+   - [x] 11.1 `DashboardController` + `DashboardQuery` + rota `GET /api/v1/dashboard`
+   - [x] 11.2 `ExportController` + `AppDataResource` + rota `GET /api/v1/export` (JSON + PDF via `?format=pdf` com `barryvdh/laravel-dompdf`)
+   - [x] 11.3 `ImportController`, `ImportRequest`, `ImportData` action + rota `POST /api/v1/import`
+   - [x] 11.4 `ImportPromptController` + rota `GET /api/v1/import/prompt`
+   - [x] 11.5 `DataController` + rotas `DELETE /api/v1/data`, `POST /api/v1/data/seed-demo`, `POST /api/v1/data/reset-demo` (todos retornam mensagem de sucesso/erro)
+   - [x] 11.6 `SearchController` + rota `GET /api/v1/search`
 - [ ] **Fase 12** — Testes, CI, hardening, deploy Render (`docs/12-testes-qualidade-deploy-render.md`)
 - [ ] **Fase 13** — Referência de integração com o front (apenas leitura)
 

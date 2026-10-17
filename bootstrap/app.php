@@ -1,5 +1,6 @@
 <?php
 
+use Barryvdh\DomPDF\ServiceProvider as DompdfServiceProvider;
 use App\Exceptions\DomainRuleException;
 use App\Http\Middleware\EnsureValidJson;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -17,6 +18,9 @@ use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
+    ->withProviders([
+        DompdfServiceProvider::class,
+    ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',

@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Categories\CategoryController;
+use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\DataController;
+use App\Http\Controllers\Api\V1\ExportController;
+use App\Http\Controllers\Api\V1\ImportController;
+use App\Http\Controllers\Api\V1\ImportPromptController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
+use App\Http\Controllers\Api\V1\SearchController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\Tasks\TaskController;
 use App\Http\Controllers\Api\V1\Timer\TimerController;
@@ -77,5 +83,15 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/notifications/{id}/read', [NotificationController::class, 'read']);
         Route::delete('/notifications', [NotificationController::class, 'clear']);
         Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+
+        // Dashboard, export, import, dados e pesquisa (Fase 11).
+        Route::get('/dashboard', [DashboardController::class, '__invoke']);
+        Route::get('/export', [ExportController::class, '__invoke']);
+        Route::post('/import', [ImportController::class, '__invoke']);
+        Route::get('/import/prompt', [ImportPromptController::class, '__invoke']);
+        Route::delete('/data', [DataController::class, 'destroy']);
+        Route::post('/data/seed-demo', [DataController::class, 'seedDemo']);
+        Route::post('/data/reset-demo', [DataController::class, 'resetDemo']);
+        Route::get('/search', [SearchController::class, '__invoke']);
     });
 });
