@@ -201,8 +201,8 @@ class ProductivityReport
             'today' => 'Hoje',
             'this_week' => 'Esta semana',
             'last_week' => 'Semana passada',
-            'this_month', 'last_month' => $months[(int) $start->month] . ' de ' . $start->format('Y'),
-            'custom' => $start->format('d/m/Y') . ' a ' . CarbonImmutable::parse($endDate)->format('d/m/Y'),
+            'this_month', 'last_month' => $months[(int) $start->month].' de '.$start->format('Y'),
+            'custom' => $start->format('d/m/Y').' a '.CarbonImmutable::parse($endDate)->format('d/m/Y'),
             default => 'Hoje',
         };
     }

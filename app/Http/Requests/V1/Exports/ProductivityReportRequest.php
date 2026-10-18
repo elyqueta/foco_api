@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\V1\Exports;
 
+use App\Models\User;
+use App\Services\UserClock;
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -126,20 +129,20 @@ class ProductivityReportRequest extends FormRequest
      *
      * @return array{type: string, label: string, start_date: string, end_date: string}
      */
-    public function computePeriod(\App\Models\User $user): array
+    public function computePeriod(User $user): array
     {
         $period = $this->input('period');
         $month = $this->input('month');
         $startDate = $this->input('start_date');
         $endDate = $this->input('end_date');
 
-        $clock = app(\App\Services\UserClock::class);
+        $clock = app(UserClock::class);
         $today = $clock->today($user);
         $tz = $clock->timezone($user);
 
         // Se mês for especificado, calcular do mês.
         if ($month !== null && $month !== '') {
-            $start = \Carbon\CarbonImmutable::parse($month.'-01', $tz)->startOfDay();
+            $start = CarbonImmutable::parse($month.'-01', $tz)->startOfDay();
             $end = (clone $start)->endOfMonth();
 
             return [
@@ -160,8 +163,9 @@ class ProductivityReportRequest extends FormRequest
                 ];
 
             case 'this_week':
-                $start = (clone $today)->startOfWeek(\Carbon\CarbonImmutable::MONDAY);
+                $start = (clone $today)->startOfWeek(CarbonImmutable::MONDAY);
                 $end = (clone $start)->addDays(6);
+
                 return [
                     'type' => 'this_week',
                     'label' => 'Esta semana',
@@ -170,8 +174,9 @@ class ProductivityReportRequest extends FormRequest
                 ];
 
             case 'last_week':
-                $start = (clone $today)->startOfWeek(\Carbon\CarbonImmutable::MONDAY)->subWeek();
+                $start = (clone $today)->startOfWeek(CarbonImmutable::MONDAY)->subWeek();
                 $end = (clone $start)->addDays(6);
+
                 return [
                     'type' => 'last_week',
                     'label' => 'Semana passada',
@@ -182,6 +187,7 @@ class ProductivityReportRequest extends FormRequest
             case 'this_month':
                 $start = (clone $today)->startOfMonth();
                 $end = (clone $start)->endOfMonth();
+
                 return [
                     'type' => 'this_month',
                     'label' => self::monthLabel($start),
@@ -192,6 +198,7 @@ class ProductivityReportRequest extends FormRequest
             case 'last_month':
                 $start = (clone $today)->startOfMonth()->subMonth();
                 $end = (clone $start)->endOfMonth();
+
                 return [
                     'type' => 'last_month',
                     'label' => self::monthLabel($start),
@@ -220,7 +227,7 @@ class ProductivityReportRequest extends FormRequest
     /**
      * Devolve o rótulo do mês em pt-PT (ex.: "Outubro de 2026").
      */
-    private static function monthLabel(\Carbon\CarbonImmutable $date): string
+    private static function monthLabel(CarbonImmutable $date): string
     {
         $months = [
             1 => 'Janeiro',
@@ -237,6 +244,6 @@ class ProductivityReportRequest extends FormRequest
             12 => 'Dezembro',
         ];
 
-        return $months[(int) $date->month] . ' de ' . $date->format('Y');
+        return $months[(int) $date->month].' de '.$date->format('Y');
     }
 }

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Exports;
 
+use App\Actions\Reports\ProductivityReport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\Exports\ProductivityReportRequest;
 use App\Http\Resources\V1\ProductivityReportResource;
-use App\Actions\Reports\ProductivityReport;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 

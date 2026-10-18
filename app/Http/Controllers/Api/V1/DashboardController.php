@@ -29,15 +29,25 @@ class DashboardController extends Controller
 
         $data = $query->forUser($user);
 
+        $todayResource = TaskResource::collection($data['today']);
+        $pendingResource = TaskResource::collection($data['pending']);
+        $urgentResource = TaskResource::collection($data['urgent']);
+        $focusTaskResource = $data['focusTask'] !== null
+            ? new TaskResource($data['focusTask'])
+            : null;
+        $activeTimerResource = $data['activeTimer'] !== null
+            ? new TaskResource($data['activeTimer'])
+            : null;
+
         return response()->json([
-            'today' => TaskResource::collection($data['today'])->resolve(),
-            'pending' => TaskResource::collection($data['pending'])->resolve(),
-            'urgent' => TaskResource::collection($data['urgent'])->resolve(),
+            'today' => $todayResource->resolve(),
+            'pending' => $pendingResource->resolve(),
+            'urgent' => $urgentResource->resolve(),
             'nextSteps' => $data['nextSteps'],
             'statsByCategory' => $data['statsByCategory'],
             'completedThisWeek' => $data['completedThisWeek'],
-            'focusTask' => $data['focusTask'] !== null ? new TaskResource($data['focusTask'])->resolve() : null,
-            'activeTimer' => $data['activeTimer'] !== null ? new TaskResource($data['activeTimer'])->resolve() : null,
+            'focusTask' => $focusTaskResource?->resolve(),
+            'activeTimer' => $activeTimerResource?->resolve(),
             'unreadNotifications' => $data['unreadNotifications'],
             'serverNow' => $data['serverNow'],
         ]);

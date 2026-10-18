@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use App\Models\Project;
-use App\Models\Task;
-use App\Models\User;
 use App\Enums\ProjectStatus;
 use App\Enums\TaskStatus;
 use App\Enums\Urgency;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\Test;

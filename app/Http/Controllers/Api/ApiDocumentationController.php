@@ -1933,9 +1933,9 @@ class ApiDocumentationController
                                 ],
                             ],
                             '401' => ['description' => 'Token ausente ou inválido.'],
-                            ],
                         ],
                     ],
+                ],
                 '/v1/exports/productivity-report' => [
                     'get' => [
                         'summary' => 'Relatório de produtividade',
