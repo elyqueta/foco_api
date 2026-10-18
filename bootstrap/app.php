@@ -103,11 +103,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // uma falha de BD no `/api/v1/auth/login` pode vir daqui.
         $exceptions->render(function (PDOException $e, Request $request) use ($apiError) {
             if ($request->expectsJson() || $request->is('api/*')) {
+                $sqlstate = $e->errorInfo[0] ?? $e->getCode();
+
+                // Erros de ligação ao BD: 08xxx (conexão), 57P01 (shutdown),
+                // 57P03 (cannot connect now), 53300 (too many connections).
+                $isConnectionError = in_array($sqlstate, ['08001', '08003', '08006', '08007'])
+                    || str_starts_with($sqlstate, '08')
+                    || in_array($sqlstate, ['57P01', '57P03', '53300']);
+
                 // Registo detalhado para depuração: mensagem, classe, SQLSTATE,
                 // exceção anterior e SQL (quando disponível).
                 $context = [
                     'class' => get_class($e),
-                    'sqlstate' => $e->getCode(),
+                    'sqlstate' => $sqlstate,
                 ];
 
                 $previous = $e->getPrevious();
@@ -118,7 +126,6 @@ return Application::configure(basePath: dirname(__DIR__))
 
                 if ($e instanceof \Illuminate\Database\QueryException) {
                     $context['sql'] = $e->getSql();
-                    $context['bindings'] = $e->getBindings();
                 }
 
                 Log::error(
@@ -127,10 +134,19 @@ return Application::configure(basePath: dirname(__DIR__))
                 );
                 report($e);
 
+                if ($isConnectionError) {
+                    return $apiError(
+                        'Não foi possível comunicar com a base de dados. Tenta novamente.',
+                        'DATABASE_ERROR',
+                        503,
+                        $e,
+                    );
+                }
+
                 return $apiError(
-                    'Não foi possível comunicar com a base de dados. Tenta novamente.',
-                    'DATABASE_ERROR',
-                    503,
+                    'Erro na base de dados. Tenta novamente.',
+                    'DATABASE_QUERY_ERROR',
+                    500,
                     $e,
                 );
             }
