@@ -11,6 +11,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
@@ -98,9 +99,32 @@ return Application::configure(basePath: dirname(__DIR__))
         // Falha de comunicação com a base de dados ou serviço externo.
         // `QueryException` estende `PDOException` e uma ligação falhada lança
         // `PDOException` directamente — apanhar a classe base cobre os dois.
-        // `report()` é deduplicado: não duplica se o Handler já registou.
+        // O rate limiter (throttle) também escreve na tabela `cache`, pelo que
+        // uma falha de BD no `/api/v1/auth/login` pode vir daqui.
         $exceptions->render(function (PDOException $e, Request $request) use ($apiError) {
             if ($request->expectsJson() || $request->is('api/*')) {
+                // Registo detalhado para depuração: mensagem, classe, SQLSTATE,
+                // exceção anterior e SQL (quando disponível).
+                $context = [
+                    'class' => get_class($e),
+                    'sqlstate' => $e->getCode(),
+                ];
+
+                $previous = $e->getPrevious();
+                if ($previous !== null) {
+                    $context['previous_class'] = get_class($previous);
+                    $context['previous_message'] = $previous->getMessage();
+                }
+
+                if ($e instanceof \Illuminate\Database\QueryException) {
+                    $context['sql'] = $e->getSql();
+                    $context['bindings'] = $e->getBindings();
+                }
+
+                Log::error(
+                    'Erro de base de dados (PDOException): '.$e->getMessage(),
+                    $context
+                );
                 report($e);
 
                 return $apiError(
