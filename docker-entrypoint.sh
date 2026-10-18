@@ -7,31 +7,32 @@ if [ -n "${PORT:-}" ]; then
     sed -ri "s/<VirtualHost \*:[0-9]+>/<VirtualHost *:${PORT}>/" /etc/apache2/sites-available/*.conf
 fi
 
-# Em produção o container NÃO usa .env: lê variáveis de ambiente diretamente.
-if [ "${APP_ENV:-local}" = "production" ] && [ -z "${APP_KEY:-}" ]; then
-    echo "ERRO: APP_KEY em falta." >&2
-    exit 1
+# Garante que existe um .env (valores de ambiente são lidos pelo Laravel em runtime).
+if [ ! -f .env ]; then
+    cp .env.example .env
 fi
 
+# Limpa caches de configuração e rotas.
 php artisan config:clear
 php artisan route:clear
+php artisan view:clear
 
+# Link do storage público.
+php artisan storage:link || true
+
+# Migrações com retry (até 5 vezes) para aguardar o compute do Neon acordar.
 if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
-    if [ -n "${DB_DIRECT_URL:-}" ]; then
-        php artisan migrate --force --database=pgsql_direct
-    else
-        php artisan migrate --force
-    fi
+    MIG_URL="${DB_DIRECT_URL:-$DB_URL}"
+    for i in 1 2 3 4 5; do
+        DB_URL="$MIG_URL" php artisan migrate --force && break
+        echo "migrate falhou (tentativa $i), a aguardar o compute do Neon..."
+        sleep 5
+    done
 fi
 
+# Seeders (opcional).
 if [ "${RUN_SEEDERS:-false}" = "true" ]; then
-    php artisan db:seed --class=ProductionSeeder --force   # idempotente (Fase 3)
-fi
-
-if [ "${APP_ENV:-local}" = "production" ]; then
-    php artisan config:cache
-    php artisan route:cache
-    php artisan event:cache
+    DB_URL="${DB_DIRECT_URL:-$DB_URL}" php artisan db:seed --force
 fi
 
 exec "$@"

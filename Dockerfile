@@ -9,9 +9,7 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev libzip-dev unzip git libsqlite3-dev libonig-dev \
         libpng-dev libjpeg-dev libfreetype6-dev libxml2-dev \
-    && docker-php-ext-install -j"$(nproc)" pdo_pgsql pgsql pdo_sqlite zip bcmath opcache mbstring \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" gd xml \
+    && docker-php-ext-install -j"$(nproc)" pdo pdo_sqlite pdo_pgsql mbstring zip gd xml bcmath \
     && a2enmod rewrite headers \
     && rm -rf /var/lib/apt/lists/*
 

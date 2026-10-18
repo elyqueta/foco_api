@@ -10,7 +10,6 @@ README.md
 docker-compose.yml
 .dockerignore
 .env
-.env.example
 .idea
 .vscode
 *.swp
