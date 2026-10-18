@@ -1,0 +1,2439 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Api;
+
+use Illuminate\Http\JsonResponse;
+
+class ApiDocumentationController
+{
+    public function openApi(): JsonResponse
+    {
+        // Operações do tick: o agendador externo pode chamar por GET ou POST
+        // (alguns serviços só permitem um dos dois) e ambas correm o mesmo
+        // tick — daí um único array reutilizado pelos dois métodos.
+        $tickOperation = [
+            'summary' => 'Correr o tick do scheduler (agendador externo)',
+            'description' => 'Trabalho único do scheduler: expira tarefas com prazo vencido (notificação `task_expired`), faz a higiene dos timers (> 16 h fechadas com `auto_pause`, aviso de timers longos e de estimativa ultrapassada), envia os **lembretes de prazo** (`task_due_soon`, `task_due_imminent`, `project_due_soon`, `project_overdue`, `task_overdue_postponed`) na hora local de cada utilizador e o **digest diário** entre `digest_hour` e `digest_hour + 6h`. Acaba com a limpeza diária (tokens Sanctum expirados e notificações antigas). **Idempotente:** repetir não duplica notificações (dedupe em `notification_dispatch_log`) e um tick a correr impede outro (lock `foco:tick`, respondido com `202 { ok, skipped: "locked" }`). **Nunca levanta excepção:** cada passo falha sozinho e conta em `failed`. **Orçamento de tempo:** passados ~25 s (`TICK_TIME_BUDGET`) deixa de processar novos itens e devolve `timeBudgetExceeded: true` — o restante corre no tick seguinte. Chamar por GET ou POST tem o mesmo efeito; sem `X-Cron-Secret` não há tick.',
+            'parameters' => [
+                [
+                    'name' => 'X-Cron-Secret',
+                    'in' => 'header',
+                    'required' => true,
+                    'description' => 'Segredo do `CRON_SECRET` no servidor (comparado com `hash_equals`). Sem segredo configurado o servidor responde `503 CRON_NOT_CONFIGURED` — nunca aceita um tick sem segredo.',
+                    'schema' => ['type' => 'string'],
+                ],
+            ],
+            'security' => [['cronSecret' => []]],
+            'responses' => [
+                '200' => [
+                    'description' => 'Tick corrido com o resumo do trabalho feito.',
+                    'content' => [
+                        'application/json' => [
+                            'schema' => ['$ref' => '#/components/schemas/TickSummary'],
+                        ],
+                    ],
+                ],
+                '202' => [
+                    'description' => 'Já havia um tick a correr — nada foi feito.',
+                    'content' => [
+                        'application/json' => [
+                            'schema' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'ok' => ['type' => 'boolean', 'example' => true],
+                                    'skipped' => ['type' => 'string', 'example' => 'locked'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '401' => ['description' => 'Segredo em falta ou errado — `{ message, code: "INVALID_CRON_SECRET" }`.'],
+                '429' => ['description' => 'Demasiadas chamadas ao tick (máximo 6 por minuto).'],
+                '503' => ['description' => 'Servidor sem `CRON_SECRET` configurado — `{ message, code: "CRON_NOT_CONFIGURED" }`.'],
+            ],
+        ];
+
+        $spec = [
+            'openapi' => '3.0.3',
+            'info' => [
+                'title' => config('app.name', 'Foco API').' — v1',
+                'version' => trim(file_get_contents(base_path('VERSION'))),
+                'description' => 'Endpoints da **versão v1** da API Foco. A versão aparece no URL (`/api/v1/*`) e na estrutura do código (`routes/api/v1.php` + namespaces `App\Http\*\V1`). Endpoints de sistema (`health`, documentação e o tick do scheduler) ficam sem versão em `/api/*`. Uma v2 futura terá a sua própria especificação em `/api/v2/docs.json`. **Padrão da API:** endpoints de atualização que não mudam nenhum valor não atualizam e respondem `422 { "code": "NO_CHANGES", "message": "Nenhuma alteração detetada." }` em vez de sucesso. **Erros da API** (sempre `{ message, code }`): `400 INVALID_JSON` (corpo não é JSON válido), `401` (`Não autenticado.`; no tick do scheduler `INVALID_CRON_SECRET` com `503 CRON_NOT_CONFIGURED` quando o servidor não tem `CRON_SECRET`), `403` (`Sem permissão.`), `404 ROUTE_NOT_FOUND` (rota inexistente, com o path na mensagem), `404` recurso inexistente (`Não encontrado.`), `405 METHOD_NOT_ALLOWED` (método não corresponde à rota, com os permitidos), `409 TIMER_ALREADY_RUNNING` (o timer desta tarefa já está a correr — devolve a `task`), `422` regra de negócio (`CATEGORY_PROTECTED`, `NO_CHANGES`, `TIMER_WRONG_STATE`, `TIMER_NOT_ALLOWED`, `TIMER_NOT_RUNNING`, `INVALID_TRANSITION`, …), `422` validação (`{ message, errors }`), `429` (demasiadas tentativas), `503 DATABASE_ERROR` (base de dados ou serviço externo indisponível), `500 INTERNAL_ERROR` (erro inesperado com mensagem accionável — nunca stack trace em produção). **Timer:** só pode existir um timer a correr por utilizador; iniciar/retomar outra tarefa pausa a actual automaticamente (`auto_pause`, devolvida em `pausedTask`). **Notificações:** criadas pelo servidor nos eventos (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`) e pelo scheduler nos lembretes de prazo e digest diário; cada evento é enviado uma única vez por canal (dedupe em `notification_dispatch_log`, com teto diário de emails e agregação anti-spam). `GET /notifications` lista, `?unread=1` filtra e `GET /notifications/unread-count` dá o badge. **Scheduler:** o trabalho do servidor (expiração, higiene dos timers, lembretes, digest e limpeza) corre no tick `POST`/`GET /internal/scheduler/tick`, chamado por um agendador externo com `X-Cron-Secret` — sem worker nem Cron Job. Autenticação por token Bearer (Sanctum) em tudo exceto `auth/login`, `auth/register` e `health`.',
+            ],
+            'servers' => [
+                ['url' => '/api', 'description' => 'Base da API: rotas de domínio em /api/v1/*, sistema em /api/*'],
+            ],
+            'paths' => [
+                '/v1/auth/login' => [
+                    'post' => [
+                        'summary' => 'Login',
+                        'description' => 'Autentica o utilizador e devolve um token Sanctum com expiração de 7 dias.',
+                        'operationId' => 'login',
+                        'tags' => ['Auth'],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['email', 'password'],
+                                        'properties' => [
+                                            'email' => ['type' => 'string', 'format' => 'email'],
+                                            'password' => ['type' => 'string', 'format' => 'password', 'minLength' => 8],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Login realizado com sucesso.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'token' => ['type' => 'string'],
+                                                'user' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'id' => ['type' => 'integer'],
+                                                        'name' => ['type' => 'string'],
+                                                        'email' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                                'expires_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => [
+                                'description' => 'Email ou palavra-passe incorretos.',
+                            ],
+                            '422' => [
+                                'description' => 'Dados de entrada inválidos.',
+                            ],
+                            '429' => [
+                                'description' => 'Demasiadas tentativas (5 por minuto por email/IP).',
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/auth/register' => [
+                    'post' => [
+                        'summary' => 'Registar utilizador',
+                        'description' => 'Auto-registo público. Cria a conta, provisiona as 3 categorias padrão (elimináveis, sem projetos nem tarefas) e devolve o token — o utilizador fica autenticado.',
+                        'operationId' => 'register',
+                        'tags' => ['Auth'],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['name', 'email', 'password', 'passwordConfirmation'],
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60],
+                                            'email' => ['type' => 'string', 'format' => 'email'],
+                                            'password' => ['type' => 'string', 'format' => 'password', 'minLength' => 8],
+                                            'passwordConfirmation' => ['type' => 'string', 'format' => 'password', 'minLength' => 8],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Utilizador criado e autenticado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'token' => ['type' => 'string'],
+                                                'user' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'id' => ['type' => 'integer'],
+                                                        'name' => ['type' => 'string'],
+                                                        'email' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                                'expires_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '422' => [
+                                'description' => 'Dados inválidos ou email já registado.',
+                            ],
+                            '429' => [
+                                'description' => 'Demasiadas tentativas (5 por minuto por IP).',
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/auth/logout' => [
+                    'post' => [
+                        'summary' => 'Logout',
+                        'description' => 'Revoga o token actual.',
+                        'operationId' => 'logout',
+                        'tags' => ['Auth'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Sessão terminada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Sessão terminada.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/auth/logout-all' => [
+                    'post' => [
+                        'summary' => 'Logout em todos os dispositivos',
+                        'description' => 'Revoga todos os tokens do utilizador.',
+                        'operationId' => 'logoutAll',
+                        'tags' => ['Auth'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Sessão terminada em todos os dispositivos.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Sessão terminada em todos os dispositivos.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/auth/me' => [
+                    'get' => [
+                        'summary' => 'Utilizador autenticado',
+                        'description' => 'Devolve os dados do utilizador associado ao token Sanctum.',
+                        'operationId' => 'getAuthenticatedUser',
+                        'tags' => ['Auth'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Utilizador autenticado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'id' => ['type' => 'integer'],
+                                                'name' => ['type' => 'string'],
+                                                'email' => ['type' => 'string'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/auth/password' => [
+                    'patch' => [
+                        'summary' => 'Alterar palavra-passe',
+                        'description' => 'Altera a palavra-passe do utilizador e revoga os outros tokens.',
+                        'operationId' => 'updatePassword',
+                        'tags' => ['Auth'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['currentPassword', 'password', 'passwordConfirmation'],
+                                        'properties' => [
+                                            'currentPassword' => ['type' => 'string'],
+                                            'password' => ['type' => 'string', 'minLength' => 8],
+                                            'passwordConfirmation' => ['type' => 'string', 'minLength' => 8],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Palavra-passe alterada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Palavra-passe alterada.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '422' => [
+                                'description' => 'Palavra-passe atual incorreta ou nenhuma alteração detetada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/auth/profile' => [
+                    'patch' => [
+                        'summary' => 'Atualizar nome e/ou email',
+                        'description' => 'Altera o nome e/ou o email do utilizador autenticado. Envie pelo menos um dos dois. Mudar o email exige `currentPassword` e cada mudança fica registada em `email_change_logs` (email antigo, novo, utilizador, data e IP).',
+                        'operationId' => 'updateProfile',
+                        'tags' => ['Auth'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60],
+                                            'email' => ['type' => 'string', 'format' => 'email'],
+                                            'currentPassword' => ['type' => 'string', 'description' => 'Obrigatório ao mudar o email.'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Perfil atualizado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Perfil atualizado.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => [
+                                'description' => 'Dados inválidos, email já registado, palavra-passe atual incorreta ou nenhuma alteração detetada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/auth/onboarding' => [
+                    'get' => [
+                        'summary' => 'Estado do onboarding',
+                        'description' => 'Devolve se o onboarding está concluído e o passo atual do utilizador autenticado.',
+                        'operationId' => 'getOnboarding',
+                        'tags' => ['Onboarding'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Estado do onboarding.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'completed' => ['type' => 'boolean', 'example' => false],
+                                                'currentStep' => ['type' => 'integer', 'example' => 1],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/auth/onboarding/complete' => [
+                    'post' => [
+                        'summary' => 'Concluir onboarding',
+                        'description' => 'Marca o onboarding como concluído para o utilizador autenticado.',
+                        'operationId' => 'completeOnboarding',
+                        'tags' => ['Onboarding'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => false,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'currentStep' => ['type' => 'integer', 'minimum' => 1, 'example' => 2],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Onboarding concluído.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Onboarding concluído.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => [
+                                'description' => 'Dados inválidos.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'O passo atual deve ser um número inteiro.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/settings' => [
+                    'get' => [
+                        'summary' => 'Definições do utilizador',
+                        'description' => 'Devolve nome, tema, fuso horário e preferências de notificação.',
+                        'operationId' => 'getSettings',
+                        'tags' => ['Definições'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => ['description' => 'Definições do utilizador.'],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                    'patch' => [
+                        'summary' => 'Actualizar definições',
+                        'description' => 'Actualização parcial: `userName`, `theme`, `timezone`, `notifications`.',
+                        'operationId' => 'updateSettings',
+                        'tags' => ['Definições'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'userName' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60],
+                                            'theme' => ['type' => 'string', 'enum' => ['light', 'dark']],
+                                            'timezone' => ['type' => 'string', 'example' => 'Africa/Luanda'],
+                                            'notifications' => ['type' => 'object'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => ['description' => 'Definições actualizadas.'],
+                            '422' => [
+                                'description' => 'Dados inválidos ou nenhuma alteração detetada (code NO_CHANGES).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/categories' => [
+                    'get' => [
+                        'summary' => 'Listar categorias',
+                        'description' => 'Categorias do utilizador autenticado, padrão primeiro e depois ordem alfabética, com contagens de tarefas e projetos.',
+                        'operationId' => 'listCategories',
+                        'tags' => ['Categorias'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de categorias.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => [
+                                                'type' => 'object',
+                                                'properties' => [
+                                                    'name' => ['type' => 'string', 'example' => 'Estudos'],
+                                                    'isDefault' => ['type' => 'boolean'],
+                                                    'tasksCount' => ['type' => 'integer'],
+                                                    'projectsCount' => ['type' => 'integer'],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                    'post' => [
+                        'summary' => 'Criar categoria',
+                        'description' => 'Cria uma categoria personalizada. Nome: 2–60 caracteres, sem duplicados (comparação insensível a maiúsculas e espaços).',
+                        'operationId' => 'createCategory',
+                        'tags' => ['Categorias'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['name'],
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 60, 'example' => 'Estudos'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Categoria criada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'name' => ['type' => 'string'],
+                                                'isDefault' => ['type' => 'boolean', 'example' => false],
+                                                'tasksCount' => ['type' => 'integer', 'example' => 0],
+                                                'projectsCount' => ['type' => 'integer', 'example' => 0],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Nome inválido ou já existente.'],
+                        ],
+                    ],
+                ],
+                '/v1/categories/{name}' => [
+                    'delete' => [
+                        'summary' => 'Remover categoria',
+                        'description' => 'Remove uma categoria personalizada. As tarefas e projetos do utilizador nessa categoria passam para `professional`. Categorias padrão não podem ser removidas.',
+                        'operationId' => 'deleteCategory',
+                        'tags' => ['Categorias'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'name',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'Nome da categoria (URL-encoded; resolvido independentemente de maiúsculas/espaços).',
+                                'schema' => ['type' => 'string', 'example' => 'Estudos'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Categoria removida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Categoria removida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Categoria inexistente.'],
+                            '422' => ['description' => 'Categoria padrão (code CATEGORY_PROTECTED).'],
+                        ],
+                    ],
+                ],
+                '/v1/projects' => [
+                    'get' => [
+                        'summary' => 'Listar projetos',
+                        'description' => 'Projetos do utilizador autenticado, do mais recente ao mais antigo, **sem** `activity` e com `progress` (`{ total, done, percent }`; tarefas `expired` contam no total). Filtros opcionais: `category` (nome canónico ou variação), `status`, `q` (pesquisa em nome e descrição) e a página (`page` ≥ 1, `perPage` 1…100 — 20 por omissão). Resposta: `{ items, page, perPage, total, totalPages, counts }`, onde `counts` traz as contagens por estado com os mesmos filtros **excepto o de estado**.',
+                        'operationId' => 'listProjects',
+                        'tags' => ['Projetos'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'category',
+                                'in' => 'query',
+                                'description' => 'Filtra por categoria (comparação insensível a maiúsculas/espaços). Categoria inexistente devolve lista vazia.',
+                                'schema' => ['type' => 'string', 'example' => 'professional'],
+                            ],
+                            [
+                                'name' => 'status',
+                                'in' => 'query',
+                                'description' => 'Filtra por estado do projeto.',
+                                'schema' => ['type' => 'string', 'enum' => ['active', 'paused', 'done']],
+                            ],
+                            [
+                                'name' => 'q',
+                                'in' => 'query',
+                                'description' => 'Pesquisa em nome e descrição (case-insensitive).',
+                                'schema' => ['type' => 'string', 'example' => 'loja'],
+                            ],
+                            [
+                                'name' => 'page',
+                                'in' => 'query',
+                                'description' => 'Página pedida (≥ 1).',
+                                'schema' => ['type' => 'integer', 'minimum' => 1, 'default' => 1],
+                            ],
+                            [
+                                'name' => 'perPage',
+                                'in' => 'query',
+                                'description' => 'Projetos por página (1…100).',
+                                'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 20],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Página de projetos com totais e contagens por estado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'items' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Project'],
+                                                ],
+                                                'page' => ['type' => 'integer', 'example' => 1],
+                                                'perPage' => ['type' => 'integer', 'example' => 20],
+                                                'total' => ['type' => 'integer', 'example' => 8],
+                                                'totalPages' => ['type' => 'integer', 'example' => 1],
+                                                'counts' => [
+                                                    'type' => 'object',
+                                                    'description' => 'Contagens por estado com os mesmos filtros **excepto o de estado**.',
+                                                    'properties' => [
+                                                        'active' => ['type' => 'integer', 'example' => 5],
+                                                        'paused' => ['type' => 'integer', 'example' => 2],
+                                                        'done' => ['type' => 'integer', 'example' => 1],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Filtro `status` inválido ou `page`/`perPage` fora dos limites.'],
+                        ],
+                    ],
+                    'post' => [
+                        'summary' => 'Criar projeto',
+                        'description' => 'Cria um projeto com os valores enviados. `name` é obrigatório (2–255 caracteres); os restantes campos têm default (`description=""`, `category=professional`, `urgency=medium`, `status=active`, `canPostpone=true`, `dueDate=null`, `nextStep=""`, `color=#6C5CE7`). Devolve o detalhe, com a atividade `created`.',
+                        'operationId' => 'createProject',
+                        'tags' => ['Projetos'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/ProjectInput'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Projeto criado (detalhe, com `activity`).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Project'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Dados inválidos (incluindo `category` que não existe nas categorias do utilizador).'],
+                        ],
+                    ],
+                ],
+                '/v1/projects/{id}' => [
+                    'parameters' => [
+                        [
+                            'name' => 'id',
+                            'in' => 'path',
+                            'required' => true,
+                            'description' => 'UUID do projeto.',
+                            'schema' => ['type' => 'string', 'format' => 'uuid'],
+                        ],
+                    ],
+                    'get' => [
+                        'summary' => 'Detalhe do projeto',
+                        'description' => 'Projeto com `activity` (entradas mais recentes primeiro) e `progress`. Projeto inexistente ou de outro utilizador devolve `404 Não encontrado.`.',
+                        'operationId' => 'getProject',
+                        'tags' => ['Projetos'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Projeto.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Project'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Projeto inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                    'patch' => [
+                        'summary' => 'Atualizar projeto',
+                        'description' => 'Atualização **parcial**: só os campos enviados mudam. Cada pedido regista no máximo uma atividade por tipo: `status_changed` ("Estado alterado para {Ativo|Pausado|Concluído}") quando o estado muda, `next_step_changed` ("Próximo passo atualizado") quando o próximo passo muda e **uma** entrada `edited` ("Projeto editado") para qualquer outro campo alterado. Se nenhum valor mudar, não atualiza e responde `422 { code: "NO_CHANGES", message: "Nenhuma alteração detetada." }`.',
+                        'operationId' => 'updateProject',
+                        'tags' => ['Projetos'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => false,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/ProjectInput'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Projeto atualizado (detalhe, com `activity`).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Project'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Projeto inexistente ou de outro utilizador.'],
+                            '422' => [
+                                'description' => 'Dados inválidos, `category` inexistente ou nenhuma alteração detetada (code NO_CHANGES).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Nenhuma alteração detetada.'],
+                                                'code' => ['type' => 'string', 'example' => 'NO_CHANGES'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'delete' => [
+                        'summary' => 'Remover projeto',
+                        'description' => 'Apaga o projeto e, em cascata, as suas tarefas, as entradas de tempo dessas tarefas e o histórico de atividade. A confirmação é do front. Responde `200` com a mensagem de sucesso (um `204` não pode ter corpo).',
+                        'operationId' => 'deleteProject',
+                        'tags' => ['Projetos'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Projeto removido.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Projeto removido.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Projeto inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/projects/{id}/notes' => [
+                    'post' => [
+                        'summary' => 'Adicionar nota ao projeto',
+                        'description' => 'Cria uma entrada de atividade `note` com o texto enviado (1–2000 caracteres) e devolve a entrada criada.',
+                        'operationId' => 'addProjectNote',
+                        'tags' => ['Projetos'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID do projeto.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['text'],
+                                        'properties' => [
+                                            'text' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 2000, 'example' => 'Falar com o fornecedor'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Nota criada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Projeto inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Texto vazio ou superior a 2000 caracteres.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks' => [
+                    'get' => [
+                        'summary' => 'Listar tarefas',
+                        'description' => 'Tarefas do utilizador autenticado, **sem** `activity`, **paginiadas**. Antes de listar corre a expiração preguiçosa (tarefas `todo`/`in_progress` com `due_date` anterior a hoje passam a `expired`). Filtros opcionais: `category`, `urgency`, `status` (um ou vários separados por vírgula), `projectId` (UUID ou `none` para tarefas soltas), `q` (título, descrição, nome do projeto e tags), `dueFrom`/`dueTo` (`YYYY-MM-DD`, calendário), `includeDone` e `includeExpired` (ambos `false` por omissão), `sort` (`urgency|dueDate|createdAt`; por omissão urgência e depois prazo ascendente, nulos por último) e a página (`page` ≥ 1, `perPage` 1…100 — 20 por omissão). Resposta: `{ items, page, perPage, total, totalPages, counts }`, onde `counts` traz as contagens por estado com os mesmos filtros **excepto o de estado** (para o front desenhar os separadores sem pedir uma lista por estado).',
+                        'operationId' => 'listTasks',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            ['name' => 'category', 'in' => 'query', 'description' => 'Filtra por categoria (insensível a maiúsculas/espaços). Categoria inexistente devolve lista vazia.', 'schema' => ['type' => 'string', 'example' => 'professional']],
+                            ['name' => 'urgency', 'in' => 'query', 'description' => 'Filtra por urgência.', 'schema' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']]],
+                            ['name' => 'status', 'in' => 'query', 'description' => 'Um ou vários estados separados por vírgula (ex. `todo,in_progress`).', 'schema' => ['type' => 'string', 'example' => 'todo,in_progress']],
+                            ['name' => 'projectId', 'in' => 'query', 'description' => 'UUID de um projeto do utilizador, ou `none` para tarefas soltas.', 'schema' => ['type' => 'string']],
+                            ['name' => 'q', 'in' => 'query', 'description' => 'Pesquisa em título, descrição, nome do projeto e tags (case-insensitive).', 'schema' => ['type' => 'string', 'example' => 'angular']],
+                            ['name' => 'dueFrom', 'in' => 'query', 'description' => 'Data mínima do prazo (YYYY-MM-DD).', 'schema' => ['type' => 'string', 'example' => '2026-10-01']],
+                            ['name' => 'dueTo', 'in' => 'query', 'description' => 'Data máxima do prazo (YYYY-MM-DD).', 'schema' => ['type' => 'string', 'example' => '2026-10-31']],
+                            ['name' => 'includeDone', 'in' => 'query', 'description' => 'Aceite por compatibilidade; já não altera o resultado (o histórico completo passou a ser a omissão).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'includeExpired', 'in' => 'query', 'description' => 'Aceite por compatibilidade; já não altera o resultado (o histórico completo passou a ser a omissão).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'openOnly', 'in' => 'query', 'description' => 'Restringe a lista às tarefas abertas (`todo`, `in_progress`, `postponed`).', 'schema' => ['type' => 'string', 'enum' => ['true', 'false', '0', '1']]],
+                            ['name' => 'sort', 'in' => 'query', 'description' => 'Ordenação.', 'schema' => ['type' => 'string', 'enum' => ['urgency', 'dueDate', 'createdAt']]],
+                            ['name' => 'page', 'in' => 'query', 'description' => 'Página pedida (≥ 1).', 'schema' => ['type' => 'integer', 'minimum' => 1, 'default' => 1]],
+                            ['name' => 'perPage', 'in' => 'query', 'description' => 'Tarefas por página (1…100).', 'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 20]],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Página de tarefas com totais e contagens por estado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'items' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Task'],
+                                                ],
+                                                'page' => ['type' => 'integer', 'example' => 1],
+                                                'perPage' => ['type' => 'integer', 'example' => 20],
+                                                'total' => ['type' => 'integer', 'example' => 57],
+                                                'totalPages' => ['type' => 'integer', 'example' => 3],
+                                                'counts' => [
+                                                    'type' => 'object',
+                                                    'description' => 'Contagens por estado com os mesmos filtros **excepto o de estado**.',
+                                                    'properties' => [
+                                                        'todo' => ['type' => 'integer', 'example' => 12],
+                                                        'in_progress' => ['type' => 'integer', 'example' => 5],
+                                                        'done' => ['type' => 'integer', 'example' => 30],
+                                                        'postponed' => ['type' => 'integer', 'example' => 3],
+                                                        'expired' => ['type' => 'integer', 'example' => 7],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Filtros inválidos (ex. `status` ou `urgency` desconhecidos, `page`/`perPage` fora dos limites).'],
+                        ],
+                    ],
+                    'post' => [
+                        'summary' => 'Criar tarefa',
+                        'description' => 'Cria uma tarefa. `title` é obrigatório (2–255 caracteres). Defaults: `description=""`, `category=professional`, `urgency=medium`, `status=todo` (só `todo|in_progress|postponed` na criação), `canPostpone=true`, `nextStep=""`, `estimateMinutes=null`, `tags=[]`, `projectId=null`. `dueDate` no passado é rejeitado (`422 PAST_DUE_DATE`). Devolve o detalhe, com a atividade `created`.',
+                        'operationId' => 'createTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/TaskInput'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Tarefa criada (detalhe, com `activity`).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Task'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => [
+                                'description' => 'Dados inválidos, `category`/`projectId` inexistentes ou prazo no passado (code PAST_DUE_DATE).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Não é possível criar tarefas com prazo no passado.'],
+                                                'code' => ['type' => 'string', 'example' => 'PAST_DUE_DATE'],
+                                                'errors' => ['type' => 'object', 'example' => ['dueDate' => ['Não é possível criar tarefas com prazo no passado.']]],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}' => [
+                    'parameters' => [
+                        [
+                            'name' => 'id',
+                            'in' => 'path',
+                            'required' => true,
+                            'description' => 'UUID da tarefa.',
+                            'schema' => ['type' => 'string', 'format' => 'uuid'],
+                        ],
+                    ],
+                    'get' => [
+                        'summary' => 'Detalhe da tarefa',
+                        'description' => 'Tarefa com `activity` (entradas mais recentes primeiro). Tarefa inexistente ou de outro utilizador devolve `404 Não encontrado.`.',
+                        'operationId' => 'getTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Task'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                    'patch' => [
+                        'summary' => 'Atualizar tarefa',
+                        'description' => 'Atualização **parcial**. `status` segue a máquina de estados (doc 07 §5.2). Transição inválida → `422 INVALID_TRANSITION`; pedir `expired` manualmente é rejeitado (G-07); `→ postponed` sem nova data → `422 POSTPONE_REQUIRES_DATE`; reactivar uma `expired` exige novo prazo ≥ hoje. Se nenhum valor mudar → `422 { code: "NO_CHANGES" }`. Actividade: `status_changed` (estado), `next_step_changed` (próximo passo) e uma entrada `edited` ("Tarefa editada") para os outros campos; na reactivação de uma `expired`, `edited` "Prazo atualizado; tarefa reativada".',
+                        'operationId' => 'updateTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => false,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/TaskInput'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa atualizada (detalhe, com `activity`).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/Task'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Dados inválidos, transição de estado inválida (INVALID_TRANSITION/POSTPONE_REQUIRES_DATE/PAST_DUE_DATE) ou nenhuma alteração (NO_CHANGES).'],
+                        ],
+                    ],
+                    'delete' => [
+                        'summary' => 'Remover tarefa',
+                        'description' => 'Apaga a tarefa e, em cascata, as suas entradas de tempo e o histórico. Responde `200` com a mensagem de sucesso (um `204` não pode ter corpo).',
+                        'operationId' => 'deleteTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa removida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Tarefa removida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/complete' => [
+                    'post' => [
+                        'summary' => 'Concluir tarefa',
+                        'description' => 'Conclui a tarefa (`→ done`, de `todo|in_progress|postponed|expired`). Marca `completed_at`, fecha um timer aberto (motivo `complete`) e devolve `{ task, suggestCompleteProject? }`. `suggestCompleteProject` aparece quando esta é a última tarefa por concluir do projeto.',
+                        'operationId' => 'completeTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa concluída.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'suggestCompleteProject' => [
+                                                    'type' => 'object',
+                                                    'nullable' => true,
+                                                    'properties' => [
+                                                        'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                        'name' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Transição inválida (ex. tarefa já concluída) — code INVALID_TRANSITION.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/reopen' => [
+                    'post' => [
+                        'summary' => 'Reabrir tarefa',
+                        'description' => 'Reabre a tarefa (`done`/`expired` → `todo`): limpa `completed_at` e devolve `{ task }`.',
+                        'operationId' => 'reopenTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa reaberta.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Só é possível reabrir tarefas concluídas ou expiradas — code INVALID_TRANSITION.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/postpone' => [
+                    'post' => [
+                        'summary' => 'Adiar tarefa',
+                        'description' => 'Adia a tarefa (`todo`/`in_progress` → `postponed`). Requer `{ dueDate }` **com data e hora** (`YYYY-MM-DDTHH:mm`; aceita espaço e segundos opcionais). Exige `canPostpone`; a nova data tem de ser ≥ hoje (G-08) e, se hoje, a hora tem de estar no futuro. Incrementa `postponedCount` e devolve `{ task }`.',
+                        'operationId' => 'postponeTask',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['dueDate'],
+                                        'properties' => [
+                                            'dueDate' => ['type' => 'string', 'example' => '2026-10-20T14:30', 'description' => 'Data **e** hora do novo prazo (YYYY-MM-DDTHH:mm). Só a data é rejeitada.'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa adiada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Data em falta/no passado (PAST_DUE_DATE), tarefa que não pode ser adiada (TASK_CANNOT_POSTPONE) ou estado inválido (INVALID_TRANSITION).'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/notes' => [
+                    'post' => [
+                        'summary' => 'Adicionar nota à tarefa',
+                        'description' => 'Cria uma entrada de atividade `note` com o texto enviado (1–2000 caracteres) e devolve a entrada criada.',
+                        'operationId' => 'addTaskNote',
+                        'tags' => ['Tarefas'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['text'],
+                                        'properties' => [
+                                            'text' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 2000, 'example' => 'Falar com o fornecedor'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Nota criada.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Texto vazio ou superior a 2000 caracteres.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/timer/start' => [
+                    'post' => [
+                        'summary' => 'Iniciar timer',
+                        'description' => 'Inicia a contagem do tempo da tarefa (exige estado `idle`) e devolve `{ task, pausedTask? }`. `todo`/`postponed` passam a `in_progress`; a hora é sempre a do servidor (`serverNow`, no bloco `timer`). Se **outra** tarefa estiver a correr, é pausada automaticamente (`auto_pause`) e devolvida em `pausedTask`. Se esta tarefa já tiver o timer a correr → `409` com a tarefa (`code` TIMER_ALREADY_RUNNING).',
+                        'operationId' => 'startTaskTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Timer iniciado (ou tarefa já em curso — 409).',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'pausedTask' => ['$ref' => '#/components/schemas/Task'],
+                                                'message' => ['type' => 'string', 'example' => 'Esta tarefa já tem o timer a correr.'],
+                                                'code' => ['type' => 'string', 'example' => 'TIMER_ALREADY_RUNNING'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'Estado errado para o modo pedido (code TIMER_WRONG_STATE) ou tarefa concluída/expirada (code TIMER_NOT_ALLOWED, com a razão exacta na mensagem).'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/timer/pause' => [
+                    'post' => [
+                        'summary' => 'Pausar timer',
+                        'description' => 'Fecha a entrada aberta (motivo `pause`), acumula os segundos em `tasks.tracked_seconds` e mantém a tarefa `in_progress`. Sem entrada aberta → `422` (code TIMER_NOT_RUNNING). Entradas com menos de 1 segundo são descartadas. Devolve `{ task }`.',
+                        'operationId' => 'pauseTaskTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Timer pausado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '422' => ['description' => 'O timer não está a correr — code TIMER_NOT_RUNNING.'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/timer/resume' => [
+                    'post' => [
+                        'summary' => 'Retomar timer',
+                        'description' => 'Retoma a contagem da tarefa (exige estado `paused`) e devolve `{ task, pausedTask? }`. É a **única** forma de uma tarefa `postponed` voltar a `in_progress` (G-02). Aplica-se o mesmo comportamento de pausa automática do início.',
+                        'operationId' => 'resumeTaskTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Timer retomado.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'pausedTask' => ['$ref' => '#/components/schemas/Task'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                            '409' => ['description' => 'A tarefa já tem o timer a correr — code TIMER_ALREADY_RUNNING.'],
+                            '422' => ['description' => 'Estado errado para o modo pedido (code TIMER_WRONG_STATE) ou tarefa concluída/expirada (code TIMER_NOT_ALLOWED, com a razão exacta na mensagem).'],
+                        ],
+                    ],
+                ],
+                '/v1/tasks/{id}/time-entries' => [
+                    'get' => [
+                        'summary' => 'Entradas de tempo da tarefa',
+                        'description' => 'Histórico de entradas de tempo (`{ id, startedAt, endedAt, endedReason, seconds }`), mais recentes primeiro (máximo 100). `endedReason` é `pause|auto_pause|complete|postpone`.',
+                        'operationId' => 'listTaskTimeEntries',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da tarefa.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de entradas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/TimeEntry'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Tarefa inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/timer/active' => [
+                    'get' => [
+                        'summary' => 'Tarefa com o timer a correr',
+                        'description' => 'Devolve `{ task }` com o timer a correr do utilizador (para recuperar o estado ao abrir a app). Sem nenhum timer a correr devolve `200` com `{ task: null, message: "Nenhum timer a correr." }`.',
+                        'operationId' => 'getActiveTimer',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Tarefa com timer a correr, ou `task: null` com mensagem.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'task' => ['$ref' => '#/components/schemas/Task'],
+                                                'message' => ['type' => 'string', 'example' => 'Nenhum timer a correr.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/time/summary' => [
+                    'get' => [
+                        'summary' => 'Resumo de tempo',
+                        'description' => 'Totais agregados de tempo. `from`/`to` são dias (`YYYY-MM-DD`) **do fuso do utilizador**, inclusive; por omissão os últimos 7 dias. Entradas que atravessam a meia-noite são divididas pelo dia local. `groupBy`: `day` (cronológico), `task` (mais tempo primeiro, com `title`) ou `category`.',
+                        'operationId' => 'getTimeSummary',
+                        'tags' => ['Timer'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'from',
+                                'in' => 'query',
+                                'description' => 'Dia inicial (fuso do utilizador). Por omissão, há 6 dias.',
+                                'schema' => ['type' => 'string', 'example' => '2026-10-04'],
+                            ],
+                            [
+                                'name' => 'to',
+                                'in' => 'query',
+                                'description' => 'Dia final (fuso do utilizador). Por omissão, hoje.',
+                                'schema' => ['type' => 'string', 'example' => '2026-10-10'],
+                            ],
+                            [
+                                'name' => 'groupBy',
+                                'in' => 'query',
+                                'description' => 'Agrupamento dos totais.',
+                                'schema' => ['type' => 'string', 'enum' => ['day', 'task', 'category'], 'example' => 'day'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Totais agregados.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/TimeSummary'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Datas inválidas, `from > to`, período superior a um ano ou `groupBy` inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications' => [
+                    'get' => [
+                        'summary' => 'Listar notificações',
+                        'description' => 'Notificações in-app do utilizador, mais recentes primeiro (array simples, sem paginação de envelope). `?unread=1` filtra as não lidas; `?limit=` (1…100, 50 por omissão) limita a página; `?before=<uuid>` pagina para trás a partir dessa notificação. `data` traz `taskId`/`projectId` quando a notificação tem assunto.',
+                        'operationId' => 'listNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'unread',
+                                'in' => 'query',
+                                'description' => 'Só as não lidas.',
+                                'schema' => ['type' => 'boolean', 'default' => false, 'example' => true],
+                            ],
+                            [
+                                'name' => 'limit',
+                                'in' => 'query',
+                                'description' => 'Máximo de notificações devolvidas.',
+                                'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 50],
+                            ],
+                            [
+                                'name' => 'before',
+                                'in' => 'query',
+                                'description' => 'UUID da última notificação da página anterior.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Lista de notificações.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/Notification'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Filtros inválidos (`before` desconhecido — code INVALID_CURSOR, com `errors.before`).'],
+                        ],
+                    ],
+                    'delete' => [
+                        'summary' => 'Remover todas as notificações',
+                        'description' => 'Apaga todas as notificações do utilizador.',
+                        'operationId' => 'clearNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Notificações removidas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Notificações removidas.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/unread-count' => [
+                    'get' => [
+                        'summary' => 'Contar não lidas',
+                        'description' => 'Devolve `{ count }` com o número de notificações não lidas (para o badge da app).',
+                        'operationId' => 'countUnreadNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Contagem.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'count' => ['type' => 'integer', 'example' => 3],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/read-all' => [
+                    'post' => [
+                        'summary' => 'Marcar todas como lidas',
+                        'description' => 'Marca todas as notificações do utilizador como lidas (idempotente).',
+                        'operationId' => 'readAllNotifications',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Todas marcadas como lidas.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Todas as notificações foram marcadas como lidas.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/{id}/read' => [
+                    'post' => [
+                        'summary' => 'Marcar uma como lida',
+                        'description' => 'Marca a notificação como lida. Idempotente: marcar uma notificação já lida não é erro. Notificação de outro utilizador (ou `id` não-UUID) → `404`.',
+                        'operationId' => 'readNotification',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da notificação.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Notificação marcada como lida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Notificação marcada como lida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Notificação inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/notifications/{id}' => [
+                    'delete' => [
+                        'summary' => 'Remover uma notificação',
+                        'description' => 'Apaga a notificação. Notificação de outro utilizador (ou `id` não-UUID) → `404`.',
+                        'operationId' => 'deleteNotification',
+                        'tags' => ['Notificações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'description' => 'UUID da notificação.',
+                                'schema' => ['type' => 'string', 'format' => 'uuid'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Notificação removida.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'message' => ['type' => 'string', 'example' => 'Notificação removida.'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '404' => ['description' => 'Notificação inexistente ou de outro utilizador.'],
+                        ],
+                    ],
+                ],
+                '/v1/dashboard' => [
+                    'get' => [
+                        'summary' => 'Dashboard',
+                        'description' => 'Listas computadas do dia e estatísticas do utilizador. Corre a expiração preguiçosa antes de calcular. Tudo no fuso do utilizador. Devolve `{ today, pending, urgent, nextSteps, statsByCategory, completedThisWeek, focusTask, activeTimer, unreadNotifications, serverNow }`.',
+                        'operationId' => 'getDashboard',
+                        'tags' => ['Dashboard'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Dashboard do utilizador.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'today' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Task'],
+                                                ],
+                                                'pending' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Task'],
+                                                ],
+                                                'urgent' => [
+                                                    'type' => 'array',
+                                                    'items' => ['$ref' => '#/components/schemas/Task'],
+                                                ],
+                                                'nextSteps' => [
+                                                    'type' => 'array',
+                                                    'description' => 'Máx. 6 itens, ordenado por urgência.',
+                                                    'items' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'kind' => ['type' => 'string', 'enum' => ['task', 'project']],
+                                                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                            'title' => ['type' => 'string'],
+                                                            'nextStep' => ['type' => 'string'],
+                                                            'urgency' => ['type' => 'string', 'nullable' => true, 'enum' => ['critical', 'high', 'medium', 'low']],
+                                                        ],
+                                                    ],
+                                                ],
+                                                'statsByCategory' => [
+                                                    'type' => 'object',
+                                                    'description' => 'Uma entrada por categoria do utilizador.',
+                                                    'additionalProperties' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'total' => ['type' => 'integer'],
+                                                            'done' => ['type' => 'integer'],
+                                                            'percent' => ['type' => 'integer'],
+                                                        ],
+                                                    ],
+                                                ],
+                                                'completedThisWeek' => ['type' => 'integer'],
+                                                'focusTask' => ['$ref' => '#/components/schemas/Task'],
+                                                'activeTimer' => ['$ref' => '#/components/schemas/Task'],
+                                                'unreadNotifications' => ['type' => 'integer'],
+                                                'serverNow' => ['type' => 'string', 'format' => 'date-time'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/export' => [
+                    'get' => [
+                        'summary' => 'Exportar dados (backup)',
+                        'description' => 'Devolve o estado do utilizador no formato `AppData` compatível com `foco-backup.json`: `{ schemaVersion, projects, tasks, settings, categories }`. Inclui `timer.trackedSeconds` por tarefa e atividade de cada projeto/tarefa. Responde com `Content-Disposition: attachment; filename="foco-backup-YYYY-MM-DD.json"`.',
+                        'operationId' => 'exportData',
+                        'tags' => ['Dados'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Dados exportados.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/AppData'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/import' => [
+                    'post' => [
+                        'summary' => 'Importar dados',
+                        'description' => 'Importa projetos e tarefas de forma aditiva (nunca apaga, gera novos UUIDs, ignora status/ids recebidos). Validação manual por campo: se existir qualquer erro, nada é gravado (transação + rollback). Resposta de sucesso: `201 { ok:true, projectsCreated, tasksCreated }`. Erro: `422 { ok:false, errors: [...] }`.',
+                        'operationId' => 'importData',
+                        'tags' => ['Dados'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => ['$ref' => '#/components/schemas/ImportRequest'],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Importação realizada com sucesso.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'ok' => ['type' => 'boolean', 'example' => true],
+                                                'projectsCreated' => ['type' => 'integer', 'example' => 1],
+                                                'tasksCreated' => ['type' => 'integer', 'example' => 4],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '422' => [
+                                'description' => 'Erros de validação por campo.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'ok' => ['type' => 'boolean', 'example' => false],
+                                                'errors' => [
+                                                    'type' => 'array',
+                                                    'items' => ['type' => 'string', 'example' => 'projects[0]: nome é obrigatório.'],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/import/prompt' => [
+                    'get' => [
+                        'summary' => 'Prompt para IA',
+                        'description' => 'Devolve o texto do prompt para converter uma lista de tarefas em JSON do formato do Foco, atualizado com as categorias reais do utilizador.',
+                        'operationId' => 'getImportPrompt',
+                        'tags' => ['Dados'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Prompt para IA.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'prompt' => ['type' => 'string'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/data' => [
+                    'delete' => [
+                        'summary' => 'Resetar dados do utilizador',
+                        'description' => 'Apaga todos os projetos, tarefas, atividade, entradas de tempo e notificações do utilizador; recria as categorias padrão (apaga as personalizadas). Mantém conta e definições. Requer corpo `{ "confirm": "APAGAR" }`.',
+                        'operationId' => 'resetData',
+                        'tags' => ['Dados'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['confirm'],
+                                        'properties' => [
+                                            'confirm' => ['type' => 'string', 'enum' => ['APAGAR'], 'example' => 'APAGAR'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            'responses' => [
+                                '204' => [
+                                    'description' => 'Dados resetados.',
+                                ],
+                                '422' => [
+                                    'description' => `Confirmar não é "APAGAR" (code NO_CHANGES).`,
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/data/seed-demo' => [
+                    'post' => [
+                        'summary' => 'Semeiar dados de exemplo',
+                        'description' => 'Só se o utilizador não tiver projetos nem tarefas. Corre o `DemoDataSeeder` para o utilizador (2 projetos + 4 tarefas com datas relativas ao fuso do utilizador).',
+                        'operationId' => 'seedDemoData',
+                        'tags' => ['Dados'],
+                        'security' => [['bearerAuth' => []]],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Dados de exemplo semeados.',
+                            ],
+                            '409' => [
+                                'description' => 'O utilizador já tem projetos ou tarefas (code DATA_NOT_EMPTY).',
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/data/reset-demo' => [
+                    'post' => [
+                        'summary' => 'Resetar e semeiar dados de exemplo',
+                        'description' => 'Apaga todos os dados do utilizador e semeia dados de exemplo (2 projetos + 4 tarefas). Requer corpo `{ "confirm": "APAGAR" }`.',
+                        'operationId' => 'resetDemoData',
+                        'tags' => ['Dados'],
+                        'security' => [['bearerAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['confirm'],
+                                        'properties' => [
+                                            'confirm' => ['type' => 'string', 'enum' => ['APAGAR'], 'example' => 'APAGAR'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '204' => [
+                                'description' => 'Dados resetados e demo semeada.',
+                            ],
+                            '422' => [
+                                'description' => 'Confirmar não é "APAGAR" (code NO_CHANGES).',
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/search' => [
+                    'get' => [
+                        'summary' => 'Pesquisa global',
+                        'description' => 'Pesquisa case-insensitive em título/descrição/nome do projeto/tags. Devolve `{ projects: [...], tasks: [...] }`, máx. 10 itens no total (projetos primeiro). `q` vazio → listas vazias.',
+                        'operationId' => 'search',
+                        'tags' => ['Pesquisa'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'q',
+                                'in' => 'query',
+                                'description' => 'Termo de pesquisa.',
+                                'schema' => ['type' => 'string'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Resultados da pesquisa.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'projects' => [
+                                                    'type' => 'array',
+                                                    'items' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                            'name' => ['type' => 'string'],
+                                                            'tasksCount' => ['type' => 'integer'],
+                                                        ],
+                                                    ],
+                                                ],
+                                                'tasks' => [
+                                                    'type' => 'array',
+                                                    'items' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                            'title' => ['type' => 'string'],
+                                                            'dueDate' => ['type' => 'string', 'nullable' => true],
+                                                            'projectName' => ['type' => 'string', 'nullable' => true],
+                                                        ],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                        ],
+                    ],
+                ],
+                '/v1/search' => [
+                    'get' => [
+                        'summary' => 'Pesquisa global',
+                        'description' => 'Pesquisa case-insensitive em título/descrição/nome do projeto/tags. Devolve `{ projects: [...], tasks: [...] }`, máx. 10 itens no total (projetos primeiro). `q` vazio → listas vazias.',
+                        'operationId' => 'search',
+                        'tags' => ['Pesquisa'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'q',
+                                'in' => 'query',
+                                'description' => 'Termo de pesquisa.',
+                                'schema' => ['type' => 'string'],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Resultados da pesquisa.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'projects' => [
+                                                    'type' => 'array',
+                                                    'items' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                            'name' => ['type' => 'string'],
+                                                            'tasksCount' => ['type' => 'integer'],
+                                                        ],
+                                                    ],
+                                                ],
+                                                'tasks' => [
+                                                    'type' => 'array',
+                                                    'items' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                            'title' => ['type' => 'string'],
+                                                            'dueDate' => ['type' => 'string', 'nullable' => true],
+                                                            'projectName' => ['type' => 'string', 'nullable' => true],
+                                                        ],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            ],
+                        ],
+                    ],
+                '/v1/exports/productivity-report' => [
+                    'get' => [
+                        'summary' => 'Relatório de produtividade',
+                        'description' => 'Devolve todos os dados do relatório de produtividade do utilizador autenticado para o intervalo de tempo pedido. O back-end não gera PDF; o front desenha o documento. Utilizado pelo Relatório de Produtividade do front (Angular).',
+                        'operationId' => 'getProductivityReport',
+                        'tags' => ['Exportações'],
+                        'security' => [['bearerAuth' => []]],
+                        'parameters' => [
+                            [
+                                'name' => 'period',
+                                'in' => 'query',
+                                'required' => true,
+                                'schema' => ['type' => 'string', 'enum' => ['today', 'this_week', 'last_week', 'this_month', 'last_month', 'custom']],
+                                'description' => 'Período do relatório.',
+                            ],
+                            [
+                                'name' => 'start_date',
+                                'in' => 'query',
+                                'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$', 'example' => '2026-10-01'],
+                                'description' => 'Data de início (YYYY-MM-DD). Obrigatória quando period=custom.',
+                            ],
+                            [
+                                'name' => 'end_date',
+                                'in' => 'query',
+                                'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$', 'example' => '2026-10-31'],
+                                'description' => 'Data de fim (YYYY-MM-DD). Obrigatória quando period=custom.',
+                            ],
+                            [
+                                'name' => 'month',
+                                'in' => 'query',
+                                'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}$', 'example' => '2026-10'],
+                                'description' => 'Mês específico (YYYY-MM).',
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Relatório de produtividade.',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => ['$ref' => '#/components/schemas/ProductivityReport'],
+                                    ],
+                                ],
+                            ],
+                            '401' => ['description' => 'Token ausente ou inválido.'],
+                            '422' => ['description' => 'Erro de validação (período obrigatório, datas inválidas, etc.).'],
+                        ],
+                    ],
+                ],
+                '/health' => [
+                    'get' => [
+                        'summary' => 'Health check',
+                        'description' => 'Verifica se a API está activa e se consegue ligar-se à base de dados.',
+                        'operationId' => 'getHealth',
+                        'responses' => [
+                            '200' => [
+                                'description' => 'API saudável',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'status' => ['type' => 'string', 'example' => 'ok'],
+                                                'app' => ['type' => 'string', 'example' => 'Foco API'],
+                                                'db' => ['type' => 'boolean', 'example' => true],
+                                                'time' => ['type' => 'string', 'format' => 'date-time'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            '503' => [
+                                'description' => 'API activa, mas sem ligação à base de dados.',
+                            ],
+                        ],
+                    ],
+                ],
+                '/' => [
+                    'get' => [
+                        'summary' => 'Status da API',
+                        'operationId' => 'getApiStatus',
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Resposta simples',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'name' => ['type' => 'string', 'example' => 'Foco API'],
+                                                'status' => ['type' => 'string', 'example' => 'ok'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/internal/scheduler/tick' => [
+                    'post' => $tickOperation,
+                    'get' => $tickOperation,
+                ],
+            ],
+            'components' => [
+                'securitySchemes' => [
+                    'bearerAuth' => [
+                        'type' => 'http',
+                        'scheme' => 'bearer',
+                    ],
+                    'cronSecret' => [
+                        'type' => 'apiKey',
+                        'in' => 'header',
+                        'name' => 'X-Cron-Secret',
+                        'description' => 'Segredo do agendador externo (`CRON_SECRET` no servidor). Só no endpoint do tick.',
+                    ],
+                ],
+                'schemas' => [
+                    'Project' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'name' => ['type' => 'string', 'example' => 'Loja Nerd'],
+                            'description' => ['type' => 'string', 'example' => ''],
+                            'category' => ['type' => 'string', 'example' => 'personal'],
+                            'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                            'status' => ['type' => 'string', 'enum' => ['active', 'paused', 'done']],
+                            'canPostpone' => ['type' => 'boolean'],
+                            'dueDate' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-20', 'description' => 'YYYY-MM-DD (projetos não têm hora).'],
+                            'nextStep' => ['type' => 'string'],
+                            'color' => ['type' => 'string', 'example' => '#3FBF9A'],
+                            'progress' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'total' => ['type' => 'integer', 'example' => 4],
+                                    'done' => ['type' => 'integer', 'example' => 1],
+                                    'percent' => ['type' => 'integer', 'example' => 25],
+                                ],
+                            ],
+                            'createdAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'updatedAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'activity' => [
+                                'type' => 'array',
+                                'description' => 'Só no detalhe ( GET /projects/{id}, criação e atualização).',
+                                'items' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                            ],
+                        ],
+                    ],
+                    'ProjectInput' => [
+                        'type' => 'object',
+                        'required' => ['name'],
+                        'properties' => [
+                            'name' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 255, 'example' => 'Loja Nerd'],
+                            'description' => ['type' => 'string', 'example' => 'Marca de acessórios tech para geeks e gamers.'],
+                            'category' => ['type' => 'string', 'maxLength' => 60, 'example' => 'personal'],
+                            'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                            'status' => ['type' => 'string', 'enum' => ['active', 'paused', 'done']],
+                            'canPostpone' => ['type' => 'boolean'],
+                            'dueDate' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-20'],
+                            'nextStep' => ['type' => 'string', 'maxLength' => 255],
+                            'color' => ['type' => 'string', 'pattern' => '^#[0-9A-Fa-f]{6}$', 'example' => '#6C5CE7'],
+                        ],
+                    ],
+                    'ActivityEntry' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'at' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'type' => [
+                                'type' => 'string',
+                                'enum' => ['created', 'status_changed', 'note', 'postponed', 'edited', 'next_step_changed', 'expired', 'timer_started', 'timer_paused', 'timer_resumed', 'timer_stopped'],
+                            ],
+                            'message' => ['type' => 'string'],
+                        ],
+                    ],
+                    'Task' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true],
+                            'title' => ['type' => 'string', 'example' => 'Integrar API real no destino-mussulo'],
+                            'description' => ['type' => 'string', 'example' => ''],
+                            'category' => ['type' => 'string', 'example' => 'professional'],
+                            'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                            'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired']],
+                            'canPostpone' => ['type' => 'boolean'],
+                            'dueDate' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T14:30', 'description' => 'YYYY-MM-DD ou YYYY-MM-DDTHH:mm (hora local do utilizador).'],
+                            'nextStep' => ['type' => 'string', 'example' => 'Trocar mock service por HttpClient'],
+                            'estimateMinutes' => ['type' => 'integer', 'nullable' => true, 'example' => 90],
+                            'tags' => ['type' => 'array', 'items' => ['type' => 'string'], 'example' => ['angular', 'api']],
+                            'isOverdue' => ['type' => 'boolean'],
+                            'postponedCount' => ['type' => 'integer', 'example' => 0],
+                            'timer' => [
+                                'type' => 'object',
+                                'description' => 'Estado do timer, calculado pela API (o cliente nunca envia timestamps). `idle` sem tempo registado; `running` entrada aberta; `paused` tempo registado e tarefa aberta; `stopped` tarefa concluída/expirada com tempo registado. `trackedSeconds` **já inclui** a entrada a decorrer — o cliente soma apenas o tempo passado desde a resposta (deriva compensada com `serverNow`, UTC).',
+                                'properties' => [
+                                    'state' => ['type' => 'string', 'enum' => ['idle', 'running', 'paused', 'stopped']],
+                                    'runningSince' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                                    'trackedSeconds' => ['type' => 'integer', 'example' => 0],
+                                    'serverNow' => ['type' => 'string', 'example' => '2026-10-05T09:20:12Z'],
+                                    'firstStartedAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                                ],
+                            ],
+                            'createdAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'updatedAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'completedAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                            'activity' => [
+                                'type' => 'array',
+                                'description' => 'Só no detalhe ( GET /tasks/{id}, criação, atualização e respostas de ações).',
+                                'items' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                            ],
+                        ],
+                    ],
+                    'TaskInput' => [
+                        'type' => 'object',
+                        'required' => ['title'],
+                        'properties' => [
+                            'title' => ['type' => 'string', 'minLength' => 2, 'maxLength' => 255, 'example' => 'Integrar API real no destino-mussulo'],
+                            'description' => ['type' => 'string', 'example' => 'Substituir o mock por chamadas HTTP.'],
+                            'category' => ['type' => 'string', 'maxLength' => 60, 'example' => 'professional'],
+                            'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                            'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired'], 'description' => 'Na criação só `todo|in_progress|postponed`; no PATCH segue a máquina de estados (`expired` só pelo sistema).'],
+                            'canPostpone' => ['type' => 'boolean'],
+                            'dueDate' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T14:30'],
+                            'nextStep' => ['type' => 'string', 'maxLength' => 255],
+                            'estimateMinutes' => ['type' => 'integer', 'minimum' => 0, 'nullable' => true, 'example' => 90],
+                            'tags' => ['type' => 'array', 'maxItems' => 20, 'items' => ['type' => 'string', 'maxLength' => 40]],
+                            'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true, 'description' => 'UUID de um projeto do utilizador ou null.'],
+                        ],
+                    ],
+                    'TimeEntry' => [
+                        'type' => 'object',
+                        'description' => 'Entrada de tempo de uma tarefa (`task_time_entries`).',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'startedAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                            'endedAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T10:02:00Z'],
+                            'endedReason' => ['type' => 'string', 'nullable' => true, 'enum' => ['pause', 'auto_pause', 'complete', 'postpone']],
+                            'seconds' => ['type' => 'integer', 'example' => 3000, 'description' => 'max(0, fim - início) em segundos inteiros; entrada aberta conta até agora.'],
+                        ],
+                    ],
+                    'TimeSummary' => [
+                        'type' => 'object',
+                        'description' => 'Resumo de tempo agregado ( GET /time/summary).',
+                        'properties' => [
+                            'groupBy' => ['type' => 'string', 'enum' => ['day', 'task', 'category']],
+                            'from' => ['type' => 'string', 'example' => '2026-10-04'],
+                            'to' => ['type' => 'string', 'example' => '2026-10-10'],
+                            'items' => [
+                                'type' => 'array',
+                                'description' => '`day`: `{ key: "2026-10-05", seconds }` por ordem cronológica. `task`: `{ key: taskId, title, seconds }`. `category`: `{ key: "professional", seconds }`.',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'key' => ['type' => 'string', 'example' => '2026-10-05'],
+                                        'title' => ['type' => 'string', 'example' => 'Integrar API real no destino-mussulo', 'description' => 'Só em `groupBy=task`.'],
+                                        'seconds' => ['type' => 'integer', 'example' => 1840],
+                                    ],
+                                ],
+                            ],
+                            'totalSeconds' => ['type' => 'integer', 'example' => 13200],
+                        ],
+                    ],
+                    'Notification' => [
+                        'type' => 'object',
+                        'description' => 'Notificação in-app (`notifications`). Criada pelo servidor nos eventos do utilizador (`task_completed`, `task_expired`, `project_ready_to_complete`, `task_estimate_exceeded`, `timer_running_long`) e pelo scheduler nos lembretes de prazo (`task_due_soon`, `task_due_imminent`, `project_due_soon`, `project_overdue`, `task_overdue_postponed`) e no digest diário (`daily_digest`). Cada evento é enviado uma única vez por canal — dedupe em `notification_dispatch_log`, com teto diário de emails (`MAIL_DAILY_LIMIT`) e agregação anti-spam (> 5 emails no mesmo tick viram um só) — e respeita as preferências de notificação do utilizador. Os mesmos eventos vão por email quando o canal está activo (Resend), com assunto `[Foco] …` e link para o front.',
+                        'properties' => [
+                            'id' => ['type' => 'string', 'format' => 'uuid'],
+                            'type' => [
+                                'type' => 'string',
+                                'enum' => ['task_due_soon', 'task_due_imminent', 'task_expired', 'task_completed', 'task_estimate_exceeded', 'timer_running_long', 'project_due_soon', 'project_overdue', 'project_ready_to_complete', 'task_overdue_postponed', 'daily_digest', 'welcome'],
+                            ],
+                            'title' => ['type' => 'string', 'example' => 'Tarefa concluída 🎉'],
+                            'body' => ['type' => 'string', 'example' => 'Concluíste «Integrar API».'],
+                            'data' => [
+                                'type' => 'object',
+                                'description' => 'Assunto da notificação, quando existe.',
+                                'properties' => [
+                                    'taskId' => ['type' => 'string', 'format' => 'uuid'],
+                                    'projectId' => ['type' => 'string', 'format' => 'uuid'],
+                                ],
+                            ],
+                            'readAt' => ['type' => 'string', 'nullable' => true, 'example' => '2026-10-05T09:12:00Z'],
+                            'createdAt' => ['type' => 'string', 'example' => '2026-10-05T09:12:00Z'],
+                        ],
+                    ],
+                    'TickSummary' => [
+                        'type' => 'object',
+                        'description' => 'Resumo de um tick do scheduler (`POST`/`GET /internal/scheduler/tick`). Contagens lidas do `notification_dispatch_log` no próprio tick; `failed` inclui os passos que falharam isoladamente (o tick nunca levanta excepção).',
+                        'properties' => [
+                            'ok' => ['type' => 'boolean', 'example' => true],
+                            'durationMs' => ['type' => 'integer', 'example' => 1830],
+                            'expired' => ['type' => 'integer', 'example' => 2, 'description' => 'Tarefas que passaram a `expired` neste tick.'],
+                            'sent' => [
+                                'type' => 'object',
+                                'description' => 'Envios entregues no tick, por canal.',
+                                'properties' => [
+                                    'in_app' => ['type' => 'integer', 'example' => 3],
+                                    'email' => ['type' => 'integer', 'example' => 2],
+                                ],
+                            ],
+                            'skipped' => ['type' => 'integer', 'example' => 1, 'description' => 'Emails não enviados de propósito (teto diário `MAIL_DAILY_LIMIT` ou agregação anti-spam > 5 emails no mesmo tick).'],
+                            'failed' => ['type' => 'integer', 'example' => 0, 'description' => 'Envios falhados + passos que falharam (são retentados até 3 vezes).'],
+                            'timeBudgetExceeded' => ['type' => 'boolean', 'example' => false, 'description' => 'O tick parou por orçamento de tempo (`TICK_TIME_BUDGET`) — o restante corre no tick seguinte.'],
+                        ],
+                    ],
+                    'AppData' => [
+                        'type' => 'object',
+                        'description' => 'Formato de exportação/importação de dados (`AppData`, compatível com `foco-backup.json`).',
+                        'properties' => [
+                            'schemaVersion' => ['type' => 'integer', 'example' => 1],
+                            'projects' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'id' => ['type' => 'string', 'format' => 'uuid'],
+                                        'name' => ['type' => 'string'],
+                                        'description' => ['type' => 'string'],
+                                        'category' => ['type' => 'string'],
+                                        'urgency' => ['type' => 'string', 'nullable' => true, 'enum' => ['critical', 'high', 'medium', 'low']],
+                                        'status' => ['type' => 'string', 'enum' => ['active', 'paused', 'done']],
+                                        'canPostpone' => ['type' => 'boolean'],
+                                        'dueDate' => ['type' => 'string', 'nullable' => true],
+                                        'nextStep' => ['type' => 'string'],
+                                        'color' => ['type' => 'string', 'nullable' => true],
+                                        'activity' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            'tasks' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'id' => ['type' => 'string', 'format' => 'uuid'],
+                                        'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true],
+                                        'title' => ['type' => 'string'],
+                                        'description' => ['type' => 'string'],
+                                        'category' => ['type' => 'string'],
+                                        'urgency' => ['type' => 'string', 'nullable' => true, 'enum' => ['critical', 'high', 'medium', 'low']],
+                                        'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired']],
+                                        'canPostpone' => ['type' => 'boolean'],
+                                        'dueDate' => ['type' => 'string', 'nullable' => true],
+                                        'dueTime' => ['type' => 'string', 'nullable' => true],
+                                        'nextStep' => ['type' => 'string'],
+                                        'estimateMinutes' => ['type' => 'integer', 'nullable' => true],
+                                        'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
+                                        'trackedSeconds' => ['type' => 'integer'],
+                                        'activity' => [
+                                            'type' => 'array',
+                                            'items' => ['$ref' => '#/components/schemas/ActivityEntry'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            'settings' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'theme' => ['type' => 'string', 'enum' => ['light', 'dark']],
+                                    'userName' => ['type' => 'string'],
+                                ],
+                            ],
+                            'categories' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
+                        ],
+                    ],
+                    'ImportRequest' => [
+                        'type' => 'object',
+                        'description' => 'Corpo da importação: `{ projects?: [], tasks?: [] }` ou o `AppData` exportado.',
+                        'properties' => [
+                            'projects' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'name' => ['type' => 'string'],
+                                        'description' => ['type' => 'string'],
+                                        'category' => ['type' => 'string'],
+                                        'urgency' => ['type' => 'string', 'nullable' => true, 'enum' => ['critical', 'high', 'medium', 'low']],
+                                        'dueDate' => ['type' => 'string', 'nullable' => true],
+                                        'nextStep' => ['type' => 'string'],
+                                        'canPostpone' => ['type' => 'boolean'],
+                                        'color' => ['type' => 'string', 'nullable' => true],
+                                    ],
+                                ],
+                            ],
+                            'tasks' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'title' => ['type' => 'string'],
+                                        'projectId' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true],
+                                        'projectName' => ['type' => 'string', 'nullable' => true],
+                                        'category' => ['type' => 'string'],
+                                        'urgency' => ['type' => 'string', 'nullable' => true, 'enum' => ['critical', 'high', 'medium', 'low']],
+                                        'dueDate' => ['type' => 'string', 'nullable' => true],
+                                        'dueTime' => ['type' => 'string', 'nullable' => true],
+                                        'nextStep' => ['type' => 'string'],
+                                        'canPostpone' => ['type' => 'boolean'],
+                                        'estimateMinutes' => ['type' => 'integer', 'nullable' => true],
+                                        'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
+                                        'description' => ['type' => 'string'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'ProductivityReport' => [
+                        'type' => 'object',
+                        'description' => 'Relatório de produtividade do utilizador para o intervalo de tempo pedido.',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'report' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'title' => ['type' => 'string', 'example' => 'Relatório de Produtividade'],
+                                            'period' => [
+                                                'type' => 'object',
+                                                'properties' => [
+                                                    'type' => ['type' => 'string', 'example' => 'this_month'],
+                                                    'label' => ['type' => 'string', 'example' => 'Outubro de 2026'],
+                                                    'start_date' => ['type' => 'string', 'example' => '2026-10-01'],
+                                                    'end_date' => ['type' => 'string', 'example' => '2026-10-31'],
+                                                ],
+                                            ],
+                                            'generated_at' => ['type' => 'string', 'format' => 'date-time', 'example' => '2026-10-17T19:51:31+01:00'],
+                                            'timezone' => ['type' => 'string', 'example' => 'Africa/Luanda'],
+                                        ],
+                                    ],
+                                    'user' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'name' => ['type' => 'string', 'example' => 'Zua'],
+                                        ],
+                                    ],
+                                    'summary' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'projects_total' => ['type' => 'integer', 'example' => 3],
+                                            'projects_active' => ['type' => 'integer', 'example' => 2],
+                                            'tasks_total' => ['type' => 'integer', 'example' => 4],
+                                            'tasks_completed' => ['type' => 'integer', 'example' => 2],
+                                            'tasks_pending' => ['type' => 'integer', 'example' => 2],
+                                            'tasks_overdue' => ['type' => 'integer', 'example' => 1],
+                                            'tasks_due_today' => ['type' => 'integer', 'example' => 2],
+                                            'completion_rate' => ['type' => 'integer', 'example' => 50],
+                                        ],
+                                    ],
+                                    'projects' => [
+                                        'type' => 'array',
+                                        'items' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                'name' => ['type' => 'string'],
+                                                'description' => ['type' => 'string'],
+                                                'category' => ['type' => 'string', 'enum' => ['personal', 'professional', 'household']],
+                                                'status' => ['type' => 'string', 'enum' => ['active', 'paused', 'done']],
+                                                'deadline' => ['type' => 'string', 'nullable' => true],
+                                                'urgency' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                                                'progress' => ['type' => 'integer', 'example' => 50],
+                                                'next_step' => ['type' => 'string', 'nullable' => true],
+                                            ],
+                                        ],
+                                    ],
+                                    'tasks' => [
+                                        'type' => 'array',
+                                        'items' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'id' => ['type' => 'string', 'format' => 'uuid'],
+                                                'title' => ['type' => 'string'],
+                                                'category' => ['type' => 'string', 'enum' => ['personal', 'professional', 'household']],
+                                                'priority' => ['type' => 'string', 'enum' => ['critical', 'high', 'medium', 'low']],
+                                                'status' => ['type' => 'string', 'enum' => ['todo', 'in_progress', 'done', 'postponed', 'expired']],
+                                                'due_date' => ['type' => 'string', 'nullable' => true],
+                                                'due_label' => ['type' => 'string', 'enum' => ['today', 'overdue', 'upcoming', 'none']],
+                                                'estimated_minutes' => ['type' => 'integer', 'nullable' => true],
+                                                'project_id' => ['type' => 'string', 'format' => 'uuid', 'nullable' => true],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        return response()->json($spec, 200, [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    }
+}

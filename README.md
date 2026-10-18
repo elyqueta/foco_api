@@ -1,58 +1,201 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Foco API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Back-end Laravel 13 / PHP 8.3 para o projeto Foco.
 
-## About Laravel
+## Estado atual
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Fases 1–5 concluídas: setup Docker/Neon/Sanctum/CORS, auth (login, registo, perfil, password), definições, categorias e import/export-ready.
+- API versionada: rotas de domínio em `/api/v1/*` (estrutura `routes/api/v1.php` + namespaces `App\Http\*\V1`); sistema (health, docs) sem versão em `/api/*`.
+- Testes: 119 verdes; formatação `vendor/bin/pint --test` limpa.
+- Docker Engine verificado: a API e PostgreSQL local estão a correr via Compose em `http://localhost:8000`.
+- Health check: `/api/health` devolve `db: true`; documentação OpenAPI em `/api/docs.json` e UI em `/docs`.
+- O snapshot das regras do front continua pendente: o ficheiro de origem não foi fornecido em `files (2)`.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Requisitos
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- PHP 8.3
+- Composer
+- PostgreSQL (Neon em produção; local ou Docker em dev)
 
-## Learning Laravel
+## Execução local
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+```sh
+# 1) Copiar variáveis
+cp .env.example .env
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+# 2) Ajustar .env para BD local ou Neon
+#   - Neon: preencher DB_URL e DB_DIRECT_URL
+#   - Local: usar docker compose --profile local-db up -d
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+# 3) Migrations
+php artisan migrate --force
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+# 4) Servidor
+php artisan serve
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Health check: `GET http://localhost:8000/api/health`
 
-## Contributing
+## API docs
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+- OpenAPI JSON: `GET http://localhost:8000/api/docs.json`
+- UI (Redoc): abrir `http://localhost:8000/docs`
 
-## Code of Conduct
+A especificação descreve a versão v1 (rotas em `/api/v1/*`) e o catálogo de erros da API; é
+expandida à medida que as fases seguintes implementam novas rotas.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Testes
 
-## Security Vulnerabilities
+No host pode não existir a extensão `pdo_sqlite` — a suíte corre dentro do container
+(ver a secção Docker). Se o host tiver as extensões:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```sh
+composer test
+vendor/bin/pint --test
+```
 
-## License
+## Docker
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+> **Importante:** o serviço `db` só existe no profile `local-db`, por isso **todos** os comandos
+> `docker compose` precisam de `--profile local-db`. Sem isso o comando falha com
+> `service "db" is not enabled` / `depends_on` não resolvido.
+
+Serviços: `app` (API em `http://localhost:8000`) e `db` (PostgreSQL em `127.0.0.1:5437`, utilizador/password/base `foco`).
+
+### Subir / parar
+
+```sh
+# Subir tudo (primeira vez, ou após alterar Dockerfile/dependências)
+docker compose --profile local-db up -d --build
+
+# Subir sem rebuild (mais rápido, no dia-a-dia)
+docker compose --profile local-db up -d
+
+# Ver estado e saúde dos contentores
+docker compose --profile local-db ps
+
+# Parar (mantém dados do volume pgdata)
+docker compose --profile local-db stop
+
+# Reiniciar só a app (útil após restaurar a DB)
+docker compose --profile local-db restart app
+
+# Parar e remover contentores/redes (mantém dados do volume)
+docker compose --profile local-db down
+
+# APAGAR TAMBÉM OS DADOS da base local (irreversível)
+docker compose --profile local-db down -v
+```
+
+O entrypoint corre `migrate --force` a cada arranque da app (`RUN_MIGRATIONS=true`), por isso
+subir o container aplica migrations pendentes automaticamente.
+
+### Logs
+
+```sh
+# Logs da app em tempo real (erros PHP + acessos Apache)
+docker compose --profile local-db logs -f app
+
+# Só as últimas 100 linhas da app
+docker compose --profile local-db logs --tail=100 app
+
+# Logs da base de dados
+docker compose --profile local-db logs -f db
+
+# Erros da aplicação Laravel (dentro do contentor)
+docker compose --profile local-db exec app sh -c 'tail -n 50 storage/logs/laravel.log'
+```
+
+### Comandos artisan dentro do contentor
+
+```sh
+docker compose --profile local-db exec app php artisan <comando>
+
+# Exemplos do dia-a-dia
+docker compose --profile local-db exec app php artisan route:list              # rotas registadas
+docker compose --profile local-db exec app php artisan route:list --path=v1    # filtrar por path
+docker compose --profile local-db exec app php artisan migrate --force         # migrations
+docker compose --profile local-db exec app php artisan migrate:fresh --seed    # recriar BD local com dados demo
+docker compose --profile local-db exec app php artisan tinker                  # REPL do Laravel
+docker compose --profile local-db exec app php artisan foco:create-user email@exemplo.ao --name=Nome
+```
+
+### Base de dados
+
+```sh
+# psql diretamente no contentor
+docker compose --profile local-db exec db psql -U foco -d foco
+
+# Parar só a DB (útil para testar o erro 503 DATABASE_ERROR)
+docker compose --profile local-db stop db
+docker compose --profile local-db start db
+```
+
+> Se a DB ficar parada, a app pode entrar em *restart loop* (`restart: unless-stopped` +
+> `depends_on`) e o `/api/health` deixa de responder. Depois de voltar a ligar a DB, recupera com
+> `docker compose --profile local-db restart app`.
+
+### Testes e formatação
+
+O host pode não ter a extensão `pdo_sqlite`; a suíte corre dentro do contentor com SQLite em memória.
+Os `-e` são necessários porque o serviço `app` carrega `.env` via `env_file`, o que faz o PHPUnit
+saltar os `<env>` do `phpunit.xml`.
+
+```sh
+docker compose --profile local-db run --rm --no-deps \
+  -v "$(pwd):/var/www/html" \
+  -e APP_ENV=testing -e DB_CONNECTION=sqlite -e DB_DATABASE=":memory:" -e DB_URL= \
+  app bash -c "php artisan test"
+
+# Só um ficheiro/método de testes
+docker compose --profile local-db run --rm --no-deps \
+  -v "$(pwd):/var/www/html" \
+  -e APP_ENV=testing -e DB_CONNECTION=sqlite -e DB_DATABASE=":memory:" -e DB_URL= \
+  app bash -c "php artisan test --filter CategoriesTest"
+
+# Pint (formatação/estilo)
+docker compose --profile local-db run --rm --no-deps \
+  -v "$(pwd):/var/www/html" \
+  app bash -c "vendor/bin/pint"
+```
+
+> Após **alterar código**, é preciso `up -d --build` para que o container use a versão nova
+> (a imagem copia o código no build). Os comandos `run` acima montam a directoria do projecto,
+> por isso correm sempre o código actual.
+
+## Reset da base de dados sem perder alterações de código
+
+Se precisar resetar a BD (ex. `down -v`) mas quiser manter as alterações de código
+que já fez no host, siga esta ordem:
+
+```sh
+# 1) Parar e remover containers + volumes da BD (apaga todos os dados da BD)
+docker compose --profile local-db down -v
+
+# 2) Subir novamente (volumes vazios, BD sem dados)
+docker compose --profile local-db up -d
+
+# 3) Executar migrations para recriar o esquema vazio
+docker compose --profile local-db exec app php artisan migrate --force
+
+# 4) Se também alterou código no host e quer que o container use a versão nova:
+docker compose --profile local-db up -d --build app
+
+# 5) (Opcional) Popular com dados demo
+# docker compose --profile local-db exec app php artisan migrate:fresh --seed
+```
+
+**Nota:** `down -v` apaga o volume `pgdata` (todos os dados da BD). Após subir
+novamente, a BD começa vazia — as migrations recriam as tabelas, mas sem registos.
+
+Se também alterou código no host e quer que o container use a versão nova, é preciso
+`up -d --build` (a imagem copia o código no build). Sem `--build`, o `up -d`
+reutiliza a imagem existente e não inclui alterações feitas no host após o último
+build. Como alternativa, pode copiar ficheiros manualmente com `docker cp`, limpar
+caches (`config:clear`, `view:clear`, `route:clear`) e reiniciar (`restart app`).
+
+## Stack
+
+- Laravel 13, Sanctum, PostgreSQL (Neon)
+- Resend (email), sync queue
+- Docker + Apache (Render ready)
