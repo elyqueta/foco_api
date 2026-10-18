@@ -6,7 +6,6 @@ namespace App\Actions\Users;
 
 use App\Models\NotificationPreference;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
 
 class ProvisionUserDefaults
 {
@@ -31,18 +30,16 @@ class ProvisionUserDefaults
      */
     public function handle(User $user, bool $protected = true): void
     {
-        DB::transaction(function () use ($user, $protected): void {
-            foreach (self::DEFAULT_CATEGORIES as $category) {
-                $user->categories()->updateOrCreate(
-                    ['name_key' => $category['name_key']],
-                    ['name' => $category['name'], 'is_default' => $protected],
-                );
-            }
-
-            $user->notificationPreference()->firstOrCreate(
-                ['user_id' => $user->id],
-                NotificationPreference::defaultAttributes(),
+        foreach (self::DEFAULT_CATEGORIES as $category) {
+            $user->categories()->updateOrCreate(
+                ['name_key' => $category['name_key']],
+                ['name' => $category['name'], 'is_default' => $protected],
             );
-        });
+        }
+
+        $user->notificationPreference()->firstOrCreate(
+            ['user_id' => $user->id],
+            NotificationPreference::defaultAttributes(),
+        );
     }
 }

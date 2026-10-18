@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace App\Observers;
 
-use App\Actions\Users\ProvisionUserDefaults;
 use App\Models\User;
 
 class UserObserver
 {
     public function created(User $user): void
     {
-        app(ProvisionUserDefaults::class)->handle($user);
+        // ProvisionUserDefaults é chamado em AuthController::register dentro
+        // da mesma transação, para evitar transação aninhada (savepoint)
+        // que causaria 25P02 em caso de erro SQL interno.
     }
 }

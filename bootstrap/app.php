@@ -116,6 +116,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 $context = [
                     'class' => get_class($e),
                     'sqlstate' => $sqlstate,
+                    'errorInfo' => $e->errorInfo ?? null,
                 ];
 
                 $previous = $e->getPrevious();
