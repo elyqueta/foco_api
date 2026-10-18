@@ -96,6 +96,7 @@
    - [x] 12.1 `.env.production` para Render (Neon + Resend + cron secret)
    - [x] 12.2 `.github/workflows/ci.yml` (PHPUnit + Pint + Composer audit)
    - [x] 12.3 Hardening: APP_DEBUG=false, LOG_LEVEL=error, SESSION_DRIVER=database em produção; SEED_ADMIN_* preenchidos para seed de admin
+   - [x] 12.4 Dockerfile: adicionado `libonig-dev` (mbstring), `libpng-dev`/`libjpeg-dev`/`libfreetype6-dev`/`libxml2-dev` (GD/XML), extensões `mbstring`/`gd`/`xml` — build passa no Render
 - [ ] **Fase 13** — Referência de integração com o front (apenas leitura)
 
 ## Itens `CONFIRMAR` já previstos nos docs (rever com o Zua)
