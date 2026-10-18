@@ -92,7 +92,10 @@
    - [x] 11.6 `SearchController` + rota `GET /api/v1/search`
    - [x] 11.7 `ProductivityReportController` + `ProductivityReportRequest` + `ProductivityReport` action + `ProductivityReportResource` + rota `GET /api/v1/exports/productivity-report` (18 testes, todos verdes) + documentação OpenAPI
    - [x] 11.8 `OnboardingController` + `CompleteOnboardingRequest` + rotas `GET /v1/auth/onboarding` e `POST /v1/auth/onboarding/complete` + migration `onboarding_completed`/`onboarding_current_step` na tabela `users` + documentação OpenAPI
-- [ ] **Fase 12** — Testes, CI, hardening, deploy Render (`docs/12-testes-qualidade-deploy-render.md`)
+- [x] **Fase 12** — Testes, CI, hardening, deploy Render
+   - [x] 12.1 `.env.production` para Render (Neon + Resend + cron secret)
+   - [x] 12.2 `.github/workflows/ci.yml` (PHPUnit + Pint + Composer audit)
+   - [x] 12.3 Hardening: APP_DEBUG=false, LOG_LEVEL=error, SESSION_DRIVER=database em produção; SEED_ADMIN_* preenchidos para seed de admin
 - [ ] **Fase 13** — Referência de integração com o front (apenas leitura)
 
 ## Itens `CONFIRMAR` já previstos nos docs (rever com o Zua)

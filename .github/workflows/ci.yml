@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: foco_test
+          POSTGRES_USER: foco
+          POSTGRES_PASSWORD: foco
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U foco -d foco_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          extensions: pdo_pgsql, pdo_sqlite, mbstring, bcmath, xml, curl, intl, gd, zip
+          coverage: none
+
+      - name: Instalar dependências Composer
+        run: composer install --prefer-dist --no-interaction --no-progress --optimize-autoloader
+
+      - name: Criar .env de teste
+        run: |
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          sed -i 's/APP_ENV=local/APP_ENV=testing/' .env
+          sed -i 's/DB_CONNECTION=pgsql/DB_CONNECTION=sqlite/' .env
+          sed -i 's#DB_URL=#DB_DATABASE=:memory:#' .env
+          sed -i 's#DB_DIRECT_URL=#DB_URL=#' .env
+          sed -i 's/DB_SSLMODE=prefer/DB_SSLMODE=prefer/' .env
+          sed -i 's/MAIL_MAILER=log/MAIL_MAILER=array/' .env
+          sed -i 's/RESEND_API_KEY=/RESEND_API_KEY=/' .env
+          sed -i 's/RUN_MIGRATIONS=false/RUN_MIGRATIONS=true/' .env
+          cat .env | grep -E '^(APP_ENV|DB_CONNECTION|DB_DATABASE|MAIL_MAILER)' || true
+
+      - name: Executar migrations
+        run: php artisan migrate --force
+
+      - name: Executar testes (PHPUnit)
+        run: php artisan test
+
+      - name: Verificar formatação (Pint)
+        run: vendor/bin/pint --test
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: test
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Verificar dependências vulneráveis (Composer audit)
+        run: composer audit --no-interaction || true
